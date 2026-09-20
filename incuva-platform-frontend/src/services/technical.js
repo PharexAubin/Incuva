@@ -2,17 +2,31 @@
 const API_BASE_URL = '/api';
 
 /**
+ * Lit une réponse JSON. Si le serveur répond autre chose (page HTML d'erreur, route introuvable,
+ * serveur arrêté...), l'erreur indique le statut HTTP et l'URL au lieu de « Unexpected token '<' ».
+ */
+async function readJson(response) {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    let path = response.url;
+    try { path = new URL(response.url).pathname; } catch (e) { /* URL relative ou vide */ }
+    throw new Error(`Réponse inattendue du serveur (HTTP ${response.status}) pour ${path}`);
+  }
+  return response.json();
+}
+
+/**
  * Récupère les détails d'une offre d'emploi
  * @param {string} jobId - ID de l'offre
  * @returns {Promise<Object>}
  */
 export async function getJobDetails(jobId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/jobs/${jobId}/details`, {
+    const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/details`, {
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -29,7 +43,7 @@ export async function getJobDetails(jobId) {
  */
 export async function createTechnicalTest(jobId, testData) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/technical-tests`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -39,7 +53,7 @@ export async function createTechnicalTest(jobId, testData) {
       })
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la création' };
     return { success: true, data: data.data, message: data.message };
   } catch (error) {
@@ -56,7 +70,7 @@ export async function createTechnicalTest(jobId, testData) {
  */
 export async function generateAITest(jobId, config) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/technical-tests/generate-ai`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/generate-ai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -66,7 +80,7 @@ export async function generateAITest(jobId, config) {
       })
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la génération' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -107,11 +121,11 @@ export async function generateCustomAITest(jobId, customPrompt, options = {}) {
  */
 export async function getTechnicalTests(jobId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/jobs/${jobId}/technical-tests`, {
+    const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/technical-tests`, {
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -127,11 +141,11 @@ export async function getTechnicalTests(jobId) {
  */
 export async function getTechnicalTest(testId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/technical-tests/${testId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}`, {
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Test non trouvé' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -148,14 +162,14 @@ export async function getTechnicalTest(testId) {
  */
 export async function updateTechnicalTest(testId, updates) {
   try {
-    const response = await fetch(`${API_BASE_URL}/technical-tests/${testId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify(updates)
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la mise à jour' };
     return { success: true, data: data.data, message: data.message };
   } catch (error) {
@@ -171,12 +185,12 @@ export async function updateTechnicalTest(testId, updates) {
  */
 export async function deleteTechnicalTest(testId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/technical-tests/${testId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}`, {
       method: 'DELETE',
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la suppression' };
     return { success: true, message: data.message };
   } catch (error) {
@@ -194,7 +208,7 @@ export async function deleteTechnicalTest(testId) {
  */
 export async function submitTechnicalTest(testId, answers, duration = 0) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/technical-tests/${testId}/submit`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -204,7 +218,7 @@ export async function submitTechnicalTest(testId, answers, duration = 0) {
       })
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la soumission' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -220,11 +234,11 @@ export async function submitTechnicalTest(testId, answers, duration = 0) {
  */
 export async function getTestAttempts(testId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/technical-tests/${testId}/attempts`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}/attempts`, {
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -497,7 +511,7 @@ export async function canAccessTest(testId) {
       return await getTechnicalTest(testId);
     }
 
-    const data = await response.json();
+    const data = await readJson(response);
     return data;
   } catch (error) {
     console.error('Erreur canAccessTest:', error);
@@ -687,7 +701,7 @@ export function getPromptSuggestions() {
 
 export async function getCompanyJobs() {
   try {
-    const response = await fetch('api/jobs/api/job_list', {
+    const response = await fetch('/api/jobs/api/job_list', {
       credentials: 'include'
     });
 
@@ -704,7 +718,7 @@ export async function getCompanyJobs() {
       return { success: false, error: 'Erreur serveur – réponse inattendue (probablement non connecté)' };
     }
 
-    const data = await response.json();
+    const data = await readJson(response);
 
     if (!response.ok) {
       return { success: false, error: data.error || 'Erreur serveur' };
@@ -720,10 +734,10 @@ export async function getCompanyJobs() {
 export async function getJobDetail(jobId) {
   try {
     // CORRECTION : Même chose ici
-    const response = await fetch(`api/jobs/api/job_detail/${jobId}`, {  // ← Changé ici
+    const response = await fetch(`/api/jobs/api/job_detail/${jobId}`, {  // ← Changé ici
       credentials: 'include'
     });
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération' };
     return { success: true, data: data.job };
   } catch (error) {
@@ -738,11 +752,11 @@ export async function getJobDetail(jobId) {
  */
 export async function getCompanyTechnicalTests() {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/company/technical-tests`, {
+    const response = await fetch(`${API_BASE_URL}/api/company/technical-tests`, {
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération' };
     return { success: true, data: data.data || [] };
   } catch (error) {
@@ -759,14 +773,14 @@ export async function getCompanyTechnicalTests() {
  */
 export async function evaluateTestWithAI(testId, attemptId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/technical-tests/${testId}/evaluate-ai`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}/evaluate-ai`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ attempt_id: attemptId })
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de l\'évaluation' };
     return { success: true, data: data.data };
   } catch (error) {
@@ -785,7 +799,7 @@ export async function evaluateTestWithAI(testId, attemptId) {
  */
 export async function manuallyGradeAttempt(testId, attemptId, grades, feedback) {
   try {
-    const response = await fetch(`${API_BASE_URL}/technical-tests/${testId}/attempts/${attemptId}/grade`, {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/${testId}/attempts/${attemptId}/grade`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -795,7 +809,7 @@ export async function manuallyGradeAttempt(testId, attemptId, grades, feedback) 
       })
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la notation' };
     return { success: true, data: data.data, message: data.message };
   } catch (error) {
@@ -812,11 +826,11 @@ export async function manuallyGradeAttempt(testId, attemptId, grades, feedback) 
  */
 export async function getAvailableTestsForJob(jobId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/api/jobs/${jobId}/available-tests`, {
+    const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/available-tests`, {
       credentials: 'include'
     });
 
-    const data = await response.json();
+    const data = await readJson(response);
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération' };
     return { success: true, data: data.data || [], count: data.count || 0 };
   } catch (error) {

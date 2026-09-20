@@ -3,8 +3,9 @@ from flask import Blueprint, request, jsonify, session, g
 from flask_cors import cross_origin
 import logging
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
+from ..utils.recruitment_utils import to_datetime
 from ..ai.TestAI import generate_technical_test
 from ..ai.copilote import call_ia
 from ..firebase.init_firebase import db
@@ -12,6 +13,16 @@ from ..firebase.init_firebase import db
 logger = logging.getLogger(__name__)
 
 technical_test_bp = Blueprint('technical_test', __name__)
+
+
+def newest_first(docs, field):
+    """Trie des documents Firestore du plus récent au plus ancien sur `field`.
+
+    Fait en Python : combiner `where()` et `order_by()` sur des champs différents exige un index
+    composite à créer à la main dans la console Firebase, faute de quoi la requête échoue.
+    """
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(docs, key=lambda d: to_datetime(d.to_dict().get(field), default=floor), reverse=True)
 
 
 @technical_test_bp.route('/api/technical-tests', methods=['POST'])
@@ -677,10 +688,10 @@ def get_job_technical_tests(job_id):
             return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
 
         # Récupérer les tests
-        tests_query = db.collection('technical_tests') \
-            .where('job_id', '==', job_id) \
-            .order_by('created_at', direction='DESCENDING') \
-            .stream()
+        tests_query = newest_first(
+            db.collection('technical_tests').where('job_id', '==', job_id).stream(),
+            'created_at'
+        )
 
         tests = []
         for doc in tests_query:
@@ -1103,10 +1114,10 @@ def get_test_attempts(test_id):
             return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
 
         # Récupérer les tentatives
-        attempts_query = db.collection('test_attempts') \
-            .where('test_id', '==', test_id) \
-            .order_by('submitted_at', direction='DESCENDING') \
-            .stream()
+        attempts_query = newest_first(
+            db.collection('test_attempts').where('test_id', '==', test_id).stream(),
+            'submitted_at'
+        )
 
         attempts = []
         for doc in attempts_query:
@@ -1142,10 +1153,10 @@ def get_company_technical_tests():
 
     try:
         # Récupérer tous les tests de l'entreprise
-        tests_query = db.collection('technical_tests') \
-            .where('company_id', '==', session['uid']) \
-            .order_by('created_at', direction='DESCENDING') \
-            .stream()
+        tests_query = newest_first(
+            db.collection('technical_tests').where('company_id', '==', session['uid']).stream(),
+            'created_at'
+        )
 
         tests = []
         for doc in tests_query:
@@ -1609,11 +1620,13 @@ def get_available_tests_for_job(job_id):
             return jsonify({'success': False, 'error': 'Offre non trouvée'}), 404
 
         # Récupérer les tests actifs pour cette offre
-        tests_query = db.collection('technical_tests') \
-            .where('job_id', '==', job_id) \
-            .where('status', '==', 'active') \
-            .order_by('created_at', direction='DESCENDING') \
-            .stream()
+        tests_query = newest_first(
+            db.collection('technical_tests')
+            .where('job_id', '==', job_id)
+            .where('status', '==', 'active')
+            .stream(),
+            'created_at'
+        )
 
         tests = []
         for doc in tests_query:
