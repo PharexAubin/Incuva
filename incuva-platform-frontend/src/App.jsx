@@ -69,7 +69,6 @@ function App() {
         <Route path="/contracts/view/:contractId" element={<ViewContract />} />
         <Route path="/jobs" element={<JobList />} />
         <Route path="/jobs/create" element={<CreateOffers />} />
-        <Route path="/jobs/edit/:jobId" element={<CreateOffers />} />
         <Route path="/jobs/edit/:jobId" element={<EditJobs />} />
         <Route path="/jobs/candidates" element={<CandidateView />} />
         <Route path="/jobs/details/:jobId" element={<JobsDetails />} />

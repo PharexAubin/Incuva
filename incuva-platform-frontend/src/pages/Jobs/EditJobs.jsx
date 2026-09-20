@@ -27,7 +27,13 @@ export default function EditJobs() {
     setLoading(true);
     const res = await getJobDetail(jobId);
     if (res.success) {
-      setFormData(res.data);
+      // On ne garde que les champs modifiables (le reste du document n'a pas à repartir au serveur)
+      setFormData({
+        title: res.data.title || "",
+        description: res.data.description || "",
+        location: res.data.location || "",
+        salary_range: res.data.salary_range || "",
+      });
     } else {
       setError("Offre non trouvée");
     }

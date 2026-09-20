@@ -354,11 +354,46 @@ def delete_job(job_id):
         return jsonify({'error': 'Vous n\'êtes pas autorisé à supprimer cette offre'}), 403
 
     try:
-        g.db.collection('jobs').document(job_id).delete()
-        # Update metrics
+        applications = list(g.db.collection('applications').where('job_id', '==', job_id).stream())
+
+        # On ne supprime pas une offre qui a abouti à une embauche
+        if any(a.to_dict().get('status') == 'accepted' for a in applications):
+            return jsonify({
+                'error': "Cette offre a un candidat accepté : elle ne peut pas être supprimée."
+            }), 409
+
+        # Les candidatures de l'offre sont supprimées avec elle ; les candidats en attente sont prévenus.
+        # Firestore limite un batch à 500 opérations : on commit par paquets.
+        batch = g.db.batch()
+        operations = 0
+        for application_doc in applications:
+            application = application_doc.to_dict()
+            if application.get('status') == 'pending':
+                batch.set(g.db.collection('notifications').document(), {
+                    'user_id': application['candidate_id'],
+                    'type': 'job_deleted',
+                    'title': 'Offre retirée',
+                    'message': f"L'offre « {job.get('title', 'le poste')} » a été retirée par l'entreprise.",
+                    'data': {'job_id': job_id, 'company_id': user_id},
+                    'read': False,
+                    'created_at': datetime.now()
+                })
+                operations += 1
+            batch.delete(application_doc.reference)
+            operations += 1
+            if operations >= 400:
+                batch.commit()
+                batch = g.db.batch()
+                operations = 0
+        batch.delete(g.db.collection('jobs').document(job_id))
+        batch.commit()
+
         g.recruitment_service.update_metrics(user_id)
-        logger.info(f"Job {job_id} deleted successfully by user {user_id}")
-        return jsonify({'message': 'Offre supprimée avec succès'}), 200
+        logger.info(f"Job {job_id} deleted by user {user_id} with {len(applications)} application(s)")
+        return jsonify({
+            'message': 'Offre supprimée avec succès',
+            'deleted_applications': len(applications)
+        }), 200
     except Exception as e:
         logger.error(f"Error deleting job {job_id}: {str(e)}")
         return jsonify({'error': f'Erreur lors de la suppression: {str(e)}'}), 500
@@ -540,11 +575,16 @@ def api_update_job(job_id):
         return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
 
     company_id = session['uid']
-    data = request.get_json()
-    title = data.get('title')
-    description = data.get('description')
-    location = data.get('location')
-    salary_range = data.get('salary_range')
+    data = request.get_json(silent=True) or {}
+
+    def clean(field):
+        value = data.get(field)
+        return value.strip() if isinstance(value, str) else ''
+
+    title = clean('title')
+    description = clean('description')
+    location = clean('location')
+    salary_range = clean('salary_range')
 
     if not all([title, description, location, salary_range]):
         return jsonify({'success': False, 'error': 'Tous les champs sont obligatoires'}), 400

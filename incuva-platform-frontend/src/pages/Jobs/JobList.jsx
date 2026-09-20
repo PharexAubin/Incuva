@@ -1,9 +1,9 @@
 // src/pages/Jobs/JobList.jsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { getJobList, getDashboardStats } from "../../services/jobs";
+import { getJobList, getDashboardStats, deleteJob } from "../../services/jobs";
 import CandidateView from "./CandidateView";
-import { Briefcase, Users, BarChart3, Plus, ChevronRight, Loader2, AlertCircle, Calendar, Edit3, Sparkles } from "lucide-react";
+import { Briefcase, Users, BarChart3, Plus, ChevronRight, Loader2, AlertCircle, Calendar, Edit3, Trash2, Sparkles } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -18,6 +18,9 @@ export default function JobList() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("offers");
   const [insightsOpen, setInsightsOpen] = useState(false);
+  const [jobToDelete, setJobToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     const path = location.pathname;
@@ -54,6 +57,25 @@ export default function JobList() {
     }
 
     setLoading(false);
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+    setJobToDelete(null);
+    setDeleteError("");
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setDeleteError("");
+    const res = await deleteJob(jobToDelete.job_id);
+    setDeleting(false);
+    if (res.success) {
+      setJobToDelete(null);
+      loadData(); // recharge les offres et les statistiques
+    } else {
+      setDeleteError(res.error || "Impossible de supprimer l'offre");
+    }
   };
 
   // --- FONCTION DE FORMATAGE POUR LA CARTE ---
@@ -289,7 +311,7 @@ export default function JobList() {
                             />
                           </div>
 
-                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -299,6 +321,17 @@ export default function JobList() {
                               title="Modifier"
                             >
                               <Edit3 className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteError("");
+                                setJobToDelete(job);
+                              }}
+                              className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-all hover:scale-110"
+                              title="Supprimer"
+                            >
+                              <Trash2 className="w-5 h-5" />
                             </button>
                           </div>
                         </div>
@@ -310,6 +343,55 @@ export default function JobList() {
             )}
 
             {activeTab === "candidates" && <CandidateView />}
+            {jobToDelete && (
+              <div
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+                onClick={closeDeleteModal}
+              >
+                <div
+                  className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                      <Trash2 className="w-6 h-6 text-red-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900">Supprimer cette offre ?</h3>
+                  </div>
+                  <p className="text-gray-700 mb-2">
+                    L'offre <span className="font-semibold">{jobToDelete.title}</span> sera définitivement supprimée.
+                  </p>
+                  {jobToDelete.applicationCount > 0 && (
+                    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-2">
+                      Ses {jobToDelete.applicationCount} candidature{jobToDelete.applicationCount > 1 ? "s" : ""} seront
+                      également supprimée{jobToDelete.applicationCount > 1 ? "s" : ""}. Les candidats en attente seront prévenus.
+                    </p>
+                  )}
+                  {deleteError && (
+                    <p className="text-sm text-red-600 flex items-center gap-2 mb-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" /> {deleteError}
+                    </p>
+                  )}
+                  <div className="flex gap-3 mt-6">
+                    <button
+                      onClick={closeDeleteModal}
+                      disabled={deleting}
+                      className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-semibold hover:border-gray-400 transition-all disabled:opacity-70"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      onClick={confirmDelete}
+                      disabled={deleting}
+                      className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+                    >
+                      {deleting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Trash2 className="w-5 h-5" />}
+                      {deleting ? "Suppression..." : "Supprimer"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {insightsOpen && <InsightsAssistant isOpen={insightsOpen} onClose={() => setInsightsOpen(false)} />}
           </div>
         </main>

@@ -76,10 +76,10 @@ export async function getJobDetail(jobId) {
  */
 export async function deleteJob(jobId) {
   try {
-    const response = await fetch(`${API_BASE_URL}/delete_job/${jobId}`, { method: 'DELETE' });
+    const response = await fetch(`${API_BASE_URLs}/delete_job/${jobId}`, { method: 'DELETE', credentials: 'include' });
     const data = await response.json();
     if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la suppression du job' };
-    return { success: true, message: data.message };
+    return { success: true, message: data.message, deletedApplications: data.deleted_applications || 0 };
   } catch (error) {
     console.error(`Erreur deleteJob pour ${jobId}:`, error);
     return { success: false, error: error.message };
