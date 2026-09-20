@@ -8,49 +8,64 @@ import io
 from docx import Document
 import logging
 import json
+from botocore.exceptions import BotoCoreError, ClientError
+
+from ..utils.s3_utils import key_from_url, owns_key, download_object
 
 ai_bp = Blueprint('ai', __name__, url_prefix='/api/ai')
 
 
-def extract_text_from_pdf(url):
-    """Extrait le texte d'un PDF depuis une URL S3."""
+def extract_text_from_pdf(data):
+    """Extrait le texte d'un PDF (contenu binaire)."""
+    pdf_reader = PyPDF2.PdfReader(io.BytesIO(data))
+    text = ""
+    for page in pdf_reader.pages:
+        text += page.extract_text() or ""
+    return text[:5000]  # Limiter à 5000 caractères pour éviter des tokens excessifs
+
+
+def extract_text_from_docx(data):
+    """Extrait le texte d'un DOCX (contenu binaire)."""
+    doc = Document(io.BytesIO(data))
+    text = ""
+    for para in doc.paragraphs:
+        text += para.text + "\n"
+    return text[:5000]
+
+
+def load_cv_text(cv_url):
+    """Télécharge le CV de l'utilisateur connecté depuis S3 et en extrait le texte.
+
+    Renvoie (texte, None, None) ou (None, message d'erreur, code HTTP).
+    """
+    if 'uid' not in session:
+        return None, 'Non authentifié', 401
+
+    key = key_from_url(cv_url)
+    if not key or not owns_key(key, session['uid']):
+        return None, 'CV introuvable ou accès non autorisé', 403
+
+    ext = key.rsplit('.', 1)[-1].lower()
+    if ext == 'doc':
+        return None, "Le format .doc n'est pas analysable. Utilisez un PDF ou un DOCX.", 400
+    if ext not in ('pdf', 'docx'):
+        return None, 'Format de fichier non supporté', 400
+
     try:
-        # Télécharger le PDF depuis S3
-        response = requests.get(url)
-        response.raise_for_status()
+        data = download_object(key)
+    except (ClientError, BotoCoreError) as e:
+        logging.error(f"Erreur téléchargement CV {key}: {e}")
+        return None, 'Impossible de télécharger le CV depuis le stockage', 502
 
-        # Lire le PDF
-        pdf_file = io.BytesIO(response.content)
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
-
-        # Extraire le texte de toutes les pages
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-
-        return text[:5000]  # Limiter à 5000 caractères pour éviter des tokens excessifs
-    except Exception as e:
-        logging.error(f"Erreur extraction PDF: {e}")
-        return None
-
-
-def extract_text_from_docx(url):
-    """Extrait le texte d'un DOCX depuis une URL S3."""
     try:
-        response = requests.get(url)
-        response.raise_for_status()
-
-        docx_file = io.BytesIO(response.content)
-        doc = Document(docx_file)
-
-        text = ""
-        for para in doc.paragraphs:
-            text += para.text + "\n"
-
-        return text[:5000]
+        text = extract_text_from_pdf(data) if ext == 'pdf' else extract_text_from_docx(data)
     except Exception as e:
-        logging.error(f"Erreur extraction DOCX: {e}")
-        return None
+        logging.error(f"Erreur lecture CV {key}: {e}")
+        return None, 'Le fichier du CV est illisible ou corrompu', 422
+
+    if not text.strip():
+        return None, "Aucun texte lisible dans le CV (PDF scanné ou image ?). Utilisez un CV au format texte.", 422
+    return text, None, None
 
 
 # Dans ai_routes.py, améliorez la fonction d'analyse
@@ -272,16 +287,9 @@ def analyze_cv():
         if not cv_url:
             return jsonify({'success': False, 'error': 'URL du CV manquante'}), 400
 
-        # Détecter le type de fichier
-        if cv_url.endswith('.pdf'):
-            cv_text = extract_text_from_pdf(cv_url)
-        elif cv_url.endswith(('.doc', '.docx')):
-            cv_text = extract_text_from_docx(cv_url)
-        else:
-            return jsonify({'success': False, 'error': 'Format de fichier non supporté'}), 400
-
-        if not cv_text:
-            return jsonify({'success': False, 'error': 'Impossible d\'extraire le texte du CV'}), 500
+        cv_text, error, status = load_cv_text(cv_url)
+        if error:
+            return jsonify({'success': False, 'error': error}), status
 
         # Analyser avec l'IA
         analysis = analyze_cv_with_ai(cv_text)
@@ -338,16 +346,9 @@ def auto_complete_profile():
         return jsonify({'success': False, 'error': 'URL du CV manquante'}), 400
 
     try:
-        # Extraire le texte du CV
-        if cv_url.endswith('.pdf'):
-            cv_text = extract_text_from_pdf(cv_url)
-        elif cv_url.endswith(('.doc', '.docx')):
-            cv_text = extract_text_from_docx(cv_url)
-        else:
-            return jsonify({'success': False, 'error': 'Format non supporté'}), 400
-
-        if not cv_text:
-            return jsonify({'success': False, 'error': 'Impossible d\'extraire le texte'}), 500
+        cv_text, error, status = load_cv_text(cv_url)
+        if error:
+            return jsonify({'success': False, 'error': error}), status
 
         # Analyser avec l'IA
         analysis = analyze_cv_with_ai(cv_text)

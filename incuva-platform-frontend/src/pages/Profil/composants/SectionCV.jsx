@@ -1,8 +1,30 @@
 // frontend/src/pages/profil/composant/SectionCV.jsx
-import React from 'react';
+import React, { useState } from 'react';
 import { FileText, Upload, Check, AlertCircle } from 'lucide-react';
+import { getCvViewUrl } from '../../../services/auth';
 
 const SectionCV = ({ profile, formData, isEditing, cvInputRef, handleCVUpload, uploadingCv }) => {
+  const [openingCv, setOpeningCv] = useState(false);
+  const [viewError, setViewError] = useState('');
+
+  const handleViewCV = async () => {
+    setOpeningCv(true);
+    setViewError('');
+    // Ouvrir l'onglet tout de suite (clic utilisateur) pour ne pas être bloqué par le navigateur
+    const tab = window.open('', '_blank');
+    try {
+      const res = await getCvViewUrl();
+      if (!res.success) throw new Error(res.error || "Impossible d'ouvrir le CV");
+      if (tab) tab.location.href = res.url;
+      else window.location.href = res.url;
+    } catch (err) {
+      if (tab) tab.close();
+      setViewError(err.message || "Impossible d'ouvrir le CV");
+    } finally {
+      setOpeningCv(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-3xl shadow-xl p-8">
       <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
@@ -30,10 +52,13 @@ const SectionCV = ({ profile, formData, isEditing, cvInputRef, handleCVUpload, u
           )}
         </div>
       ) : profile?.cvUrl ? (
-        <a href={profile.cvUrl} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-3 text-purple-600 hover:text-purple-800 font-bold transition">
-          <FileText className="w-6 h-6" /> Voir mon CV ({profile.cvName})
-        </a>
+        <div>
+          <button type="button" onClick={handleViewCV} disabled={openingCv}
+            className="inline-flex items-center gap-3 text-purple-600 hover:text-purple-800 font-bold transition disabled:opacity-70">
+            <FileText className="w-6 h-6" /> {openingCv ? 'Ouverture...' : `Voir mon CV (${profile.cvName})`}
+          </button>
+          {viewError && <p className="mt-2 text-sm text-red-600">{viewError}</p>}
+        </div>
       ) : (
         <p className="text-gray-500 italic">Aucun CV téléversé</p>
       )}

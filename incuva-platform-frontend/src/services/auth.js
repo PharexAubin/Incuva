@@ -137,6 +137,12 @@ export async function getPresignedCvUrl(filename, filetype) {
 }
 
 
+// Lien temporaire pour consulter le CV enregistré (le bucket S3 n'est pas public)
+export async function getCvViewUrl() {
+  const res = await fetch(`${API_BASE_URL}/cv_view_url`, { credentials: 'include' });
+  return res.json();
+}
+
 // Fonction mise à jour pour uploader sur S3 via PUT
 export async function uploadCvToS3(presignedData, file) {
 

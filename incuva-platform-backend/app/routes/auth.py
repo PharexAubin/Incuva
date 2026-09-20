@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 from ..forms.employee_form import EmployeeForm
 from ..firebase.init_firebase import db
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
+from ..utils.s3_utils import key_from_url, owns_key, presigned_get_url
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -744,6 +745,30 @@ def get_presigned_cv_url():
     except Exception as e:
         print(f"Erreur S3 dans get_presigned_cv_url: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@auth_bp.route('/cv_view_url', methods=['GET'])
+def get_cv_view_url():
+    """Lien temporaire (10 min) pour consulter le CV enregistré de l'utilisateur connecté."""
+    if 'uid' not in session:
+        return jsonify({'success': False, 'error': 'Non authentifié'}), 401
+
+    user_doc = db.collection('users').document(session['uid']).get()
+    profile = user_doc.to_dict() if user_doc.exists else {}
+    cv_url = profile.get('cvUrl') or profile.get('cv_url')
+    if not cv_url:
+        return jsonify({'success': False, 'error': 'Aucun CV enregistré'}), 404
+
+    key = key_from_url(cv_url)
+    if not key or not owns_key(key, session['uid']):
+        # URL hors de notre bucket (ancien format, lien externe) : renvoyée telle quelle
+        return jsonify({'success': True, 'url': cv_url})
+
+    try:
+        return jsonify({'success': True, 'url': presigned_get_url(key)})
+    except (ClientError, BotoCoreError) as e:
+        print(f"Erreur S3 dans get_cv_view_url: {e}")
+        return jsonify({'success': False, 'error': 'Impossible de générer le lien du CV'}), 500
 
 
 @auth_bp.route('/profile/check', methods=['GET'])
