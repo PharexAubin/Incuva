@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 from flask import current_app
 
 from ..utils.recruitment_utils import to_datetime, application_date, display_name
-from ..utils.s3_utils import key_from_url, owns_key, presigned_get_url
+from ..utils.s3_utils import key_from_url, owns_key, presigned_get_url, content_type_for
 
 
 jobs_bp = Blueprint('jobs', __name__, url_prefix='/jobs')
@@ -94,14 +94,16 @@ def apply_job_api(job_id):
         # 1. Upload du CV
         resume_filename = secure_filename(resume.filename)
         resume_key = f"resumes/{user_id}/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{resume_filename}"
-        s3_client.upload_fileobj(resume, bucket, resume_key)
+        s3_client.upload_fileobj(resume, bucket, resume_key,
+                                 ExtraArgs={'ContentType': content_type_for(resume_filename) or 'application/octet-stream'})
         resume_url = f"https://{bucket}.s3.{current_app.config['S3_REGION']}.amazonaws.com/{resume_key}"
 
         # 2. Upload de la Lettre de Motivation (si fichier)
         if motivation_file:
             motivation_filename = secure_filename(motivation_file.filename)
             motivation_key = f"motivations/{user_id}/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{motivation_filename}"
-            s3_client.upload_fileobj(motivation_file, bucket, motivation_key)
+            s3_client.upload_fileobj(motivation_file, bucket, motivation_key,
+                                     ExtraArgs={'ContentType': 'application/pdf'})
             motivation_url = f"https://{bucket}.s3.{current_app.config['S3_REGION']}.amazonaws.com/{motivation_key}"
             motivation_content = None  # Le contenu sera l'URL
 

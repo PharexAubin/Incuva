@@ -6,6 +6,17 @@ from flask import current_app
 # Dossiers S3 dans lesquels un utilisateur dépose ses documents : <dossier>/<uid>/<fichier>
 USER_DOCUMENT_FOLDERS = ('cv', 'resumes', 'motivations')
 
+CONTENT_TYPES = {
+    'pdf': 'application/pdf',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+
+def content_type_for(filename):
+    """Type MIME d'un CV / d'une lettre d'après son extension (None si inconnu)."""
+    return CONTENT_TYPES.get(filename.rsplit('.', 1)[-1].lower()) if '.' in filename else None
+
 
 def get_s3_client():
     return boto3.client(
@@ -38,10 +49,20 @@ def owns_key(key, uid):
 
 
 def presigned_get_url(key, expires=600):
-    """URL de lecture temporaire : le bucket n'a pas besoin d'être public."""
+    """URL de lecture temporaire : le bucket n'a pas besoin d'être public.
+
+    Le type de contenu est imposé d'après l'extension : les fichiers déposés sans `ContentType`
+    (S3 les sert alors en binary/octet-stream) s'affichent quand même dans un iframe.
+    """
+    params = {'Bucket': current_app.config['S3_BUCKET'], 'Key': key}
+    content_type = content_type_for(key)
+    if content_type:
+        params['ResponseContentType'] = content_type
+        if content_type == 'application/pdf':
+            params['ResponseContentDisposition'] = 'inline'
     return get_s3_client().generate_presigned_url(
         ClientMethod='get_object',
-        Params={'Bucket': current_app.config['S3_BUCKET'], 'Key': key},
+        Params=params,
         ExpiresIn=expires
     )
 

@@ -744,33 +744,36 @@ export default function JobsDetails() {
               </div>
             </div>
 
-            {/* Viewer amélioré */}
+            {/* Aperçu : iframe direct sur le fichier (aucun service tiers ne reçoit le document) */}
             <div className="flex-1 bg-gray-100 relative">
-              {viewingDoc.url ? (
-                <iframe
-                  src={`https://docs.google.com/gview?url=${encodeURIComponent(viewingDoc.url)}&embedded=true`}
-                  title="Document Preview"
-                  className="w-full h-full"
-                  frameBorder="0"
-                  onError={(e) => {
-                    console.error("Erreur de chargement du document");
-                    e.target.parentElement.innerHTML = `
-                      <div class="flex flex-col items-center justify-center h-full p-8">
-                        <FileText class="w-16 h-16 text-gray-400 mb-4" />
-                        <p class="text-gray-600 text-lg font-medium mb-2">Document non prévisualisable</p>
-                        <a href="${viewingDoc.url}" 
-                           download 
-                           class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                          Télécharger pour voir le document
-                        </a>
-                      </div>
-                    `;
-                  }}
-                />
-              ) : (
+              {!viewingDoc.url ? (
                 <div className="flex flex-col items-center justify-center h-full p-8">
                   <FileText className="w-16 h-16 text-gray-400 mb-4" />
                   <p className="text-gray-600 text-lg font-medium">Document non disponible</p>
+                </div>
+              ) : getFileExtension(viewingDoc.url) === 'pdf' ? (
+                <iframe
+                  src={viewingDoc.url}
+                  title="Aperçu du document"
+                  className="w-full h-full"
+                  frameBorder="0"
+                />
+              ) : (
+                // Les navigateurs ne savent pas afficher DOC/DOCX : téléchargement uniquement
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                  <FileText className="w-16 h-16 text-gray-400 mb-4" />
+                  <p className="text-gray-600 text-lg font-medium mb-2">Aperçu indisponible pour ce format</p>
+                  <p className="text-gray-500 text-sm mb-4">
+                    Les fichiers Word ne peuvent pas être affichés dans le navigateur.
+                  </p>
+                  <a
+                    href={viewingDoc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Télécharger pour voir le document
+                  </a>
                 </div>
               )}
             </div>
