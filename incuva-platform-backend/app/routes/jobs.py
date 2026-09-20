@@ -1,12 +1,14 @@
 from firebase_admin import firestore
 from flask import Blueprint, session, request, g, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import os
 import boto3
 from botocore.exceptions import ClientError
 from werkzeug.utils import secure_filename
 from flask import current_app
+
+from ..utils.recruitment_utils import to_datetime, application_date, display_name
 
 
 jobs_bp = Blueprint('jobs', __name__, url_prefix='/jobs')
@@ -37,7 +39,7 @@ def apply_job_api(job_id):
     if not user_doc.exists or user_doc.to_dict().get('accountType') != 'individual':
         return jsonify({'success': False, 'error': 'Seuls les utilisateurs individuels peuvent postuler'}), 403
 
-        job_doc = g.db.collection('jobs').document(job_id).get()
+    job_doc = g.db.collection('jobs').document(job_id).get()
     if not job_doc.exists:
         return jsonify({'success': False, 'error': 'Offre non trouvée'}), 404
 
@@ -313,12 +315,7 @@ def api_job_detail(job_id):
         job = job_doc.to_dict()
         job['job_id'] = job_id
         # Convertir created_at en string ISO
-        if hasattr(job.get('created_at'), 'to_datetime'):
-            job['created_at'] = job['created_at'].to_datetime().isoformat()
-        elif isinstance(job.get('created_at'), datetime):
-            job['created_at'] = job['created_at'].isoformat()
-        else:
-            job['created_at'] = datetime.now().isoformat()
+        job['created_at'] = to_datetime(job.get('created_at'), default=datetime.now(timezone.utc)).isoformat()
 
         return jsonify({'success': True, 'job': job})
     except Exception as e:
@@ -474,14 +471,14 @@ def api_get_job_applications(job_id):
             data['application_id'] = doc.id
             # Récupérer le nom du candidat
             user_doc = g.db.collection('users').document(data['candidate_id']).get()
-            if user_doc.exists:
-                user_data = user_doc.to_dict()
-                data['candidate_name'] = f"{user_data.get('firstName', '')} {user_data.get('lastName', '')}".strip()
-            else:
-                data['candidate_name'] = "Utilisateur inconnu"
-            # Formatage de la date
-            if 'applied_at' in data and hasattr(data['applied_at'], 'to_datetime'):
-                data['applied_at'] = data['applied_at'].to_datetime().isoformat()
+            data['candidate_name'] = display_name(
+                user_doc.to_dict() if user_doc.exists else None,
+                fallback=data.get('candidate_name') or "Utilisateur inconnu"
+            )
+            # Formatage de la date : `applied_at` est toujours renseigné (repli sur l'ancien `submitted_at`)
+            applied_at = application_date(data, default=datetime.now(timezone.utc))
+            data['applied_at'] = applied_at.isoformat()
+            data['submitted_at'] = applied_at.isoformat()
             applications.append(data)
         return jsonify({'success': True, 'applications': applications})
     except Exception as e:
@@ -546,10 +543,7 @@ def api_get_all_active_jobs():
                 job_data['company_name'] = "Entreprise inconnue"
 
             # Formatage de la date
-            if 'created_at' in job_data and hasattr(job_data['created_at'], 'to_datetime'):
-                job_data['created_at'] = job_data['created_at'].to_datetime().isoformat()
-            elif 'created_at' not in job_data:
-                job_data['created_at'] = datetime.now().isoformat()
+            job_data['created_at'] = to_datetime(job_data.get('created_at'), default=datetime.now(timezone.utc)).isoformat()
 
             jobs.append(job_data)
 
@@ -579,8 +573,9 @@ def api_my_applications():
                 app['job_title'] = job.get('title', 'Offre inconnue')
                 company_doc = g.db.collection('users').document(job['company_id']).get()
                 app['company_name'] = company_doc.to_dict().get('companyName', 'Entreprise') if company_doc.exists else 'Entreprise'
-            if 'applied_at' in app:
-                app['applied_at'] = app['applied_at'].to_datetime().isoformat()
+            applied_at = application_date(app, default=datetime.now(timezone.utc)).isoformat()
+            app['applied_at'] = applied_at
+            app['submitted_at'] = applied_at
             applications.append(app)
         return jsonify({'success': True, 'applications': applications})
     except Exception as e:
@@ -607,7 +602,7 @@ def api_get_recruitment_insights():
 
         # 2. Récupérer toutes les candidatures + normaliser la date
         all_apps = []
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
         seven_days_ago = now - timedelta(days=7)
 
@@ -618,19 +613,8 @@ def api_get_recruitment_insights():
                 app['application_id'] = app_doc.id
                 app['job_title'] = job.get('title', 'Offre inconnue')
 
-                # NORMALISATION SÉCURISÉE DE LA DATE
-                applied_at = app.get('applied_at')
-                if hasattr(applied_at, 'to_datetime'):
-                    app['applied_at'] = applied_at.to_datetime()
-                elif isinstance(applied_at, datetime):
-                    app['applied_at'] = applied_at
-                elif isinstance(applied_at, str):
-                    try:
-                        app['applied_at'] = datetime.fromisoformat(applied_at.replace('Z', '+00:00'))
-                    except:
-                        app['applied_at'] = None
-                else:
-                    app['applied_at'] = None  # ← Valeur par défaut
+                # `applied_at` avec repli sur l'ancien `submitted_at` (None si aucune date exploitable)
+                app['applied_at'] = application_date(app)
 
                 all_apps.append(app)
 
@@ -702,7 +686,7 @@ def api_get_dashboard_stats():
                 g.db.collection('jobs').where('company_id', '==', company_id).stream()]
 
         all_apps = []
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
 
         # Compter les candidatures par offre
@@ -716,16 +700,7 @@ def api_get_dashboard_stats():
             count = 0
             for app_doc in apps_ref:
                 app = app_doc.to_dict()
-                applied_at = app.get('applied_at')
-                if hasattr(applied_at, 'to_datetime'):
-                    applied_at = applied_at.to_datetime()
-                elif isinstance(applied_at, str):
-                    try:
-                        applied_at = datetime.fromisoformat(applied_at.replace('Z', '+00:00'))
-                    except:
-                        applied_at = now
-                else:
-                    applied_at = now
+                applied_at = application_date(app, default=now)
 
                 all_apps.append({
                     'applied_at': applied_at,
@@ -892,15 +867,16 @@ def quick_apply_job(job_id):
             'company_name': company_name,
             'resume_url': cv_url,
             'resume_name': candidate_profile.get('cvName') or candidate_profile.get('cv_name', 'CV.pdf'),
-            'motivation': f"Candidature envoyée en un clic depuis le profil de {candidate_profile.get('first_name', '')} {candidate_profile.get('name', '')}",
+            'motivation': f"Candidature envoyée en un clic depuis le profil de {display_name(candidate_profile)}",
             'skills': skills_text,
             'experience': candidate_profile.get('experience', ''),
             'phone': candidate_profile.get('phone', ''),
             'status': 'pending',
             'applied_at': firestore.SERVER_TIMESTAMP,
             'submitted_at': firestore.SERVER_TIMESTAMP,
+            'urgency': 'normal',
             'is_quick_apply': True,
-            'candidate_name': f"{candidate_profile.get('first_name', '')} {candidate_profile.get('name', '')}".strip()
+            'candidate_name': display_name(candidate_profile)
         }
 
         # Ajouter la candidature

@@ -68,7 +68,10 @@ export default function CandidatesApply() {
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-sm text-gray-500">
-                        {format(new Date(app.applied_at), "dd MMM yyyy", { locale: fr })}
+                        {(() => {
+                          const d = new Date(app.applied_at || app.submitted_at);
+                          return isNaN(d) ? "—" : format(d, "dd MMM yyyy", { locale: fr });
+                        })()}
                       </span>
                       <div className="flex items-center gap-2">
                         {getStatusIcon(app.status)}

@@ -31,6 +31,12 @@ export default function CandidateView() {
       return isNaN(d) ? null : d;
   };
 
+  // Formate une date sans jamais faire planter le rendu si elle est absente ou invalide
+  const formatDate = (ts, pattern = "dd MMMM yyyy") => {
+    const d = toJSDate(ts);
+    return d ? format(d, pattern, { locale: fr }) : "—";
+  };
+
   useEffect(() => {
     loadJobsAndApplications();
   }, []);
@@ -131,7 +137,7 @@ export default function CandidateView() {
                 <p className="text-sm text-gray-600 mb-3 line-clamp-2">{job.description}</p>
                 <div className="flex items-center justify-between text-xs text-gray-500">
                   <span>{job.location}</span>
-                  <span>{format(toJSDate(job.submitted_at), "dd MMMM yyyy", { locale: fr })}</span>
+                  <span>{formatDate(job.created_at)}</span>
                 </div>
               </div>
             );
@@ -173,7 +179,7 @@ export default function CandidateView() {
                         <div>
                           <p className="font-semibold text-gray-900">{app.candidate_name}</p>
                           <p className="text-xs text-gray-500">
-                            {format(toJSDate(app.submitted_at), "dd MMMM yyyy", { locale: fr })}
+                            {formatDate(app.applied_at || app.submitted_at)}
                           </p>
                         </div>
                       </div>
@@ -213,7 +219,7 @@ export default function CandidateView() {
                 </div>
                 <div>
                   <p className="text-lg font-bold text-gray-900">{selectedCandidate.candidate_name}</p>
-                  <p className="text-sm text-gray-600">Postulé le {format(toJSDate(selectedCandidate.submitted_at), "dd MMMM yyyy", { locale: fr })}</p>
+                  <p className="text-sm text-gray-600">Postulé le {formatDate(selectedCandidate.applied_at || selectedCandidate.submitted_at)}</p>
                 </div>
               </div>
 

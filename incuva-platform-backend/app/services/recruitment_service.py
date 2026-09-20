@@ -1,6 +1,8 @@
 from firebase_admin import firestore
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
+
+from ..utils.recruitment_utils import to_datetime, application_date, display_name
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +22,22 @@ class RecruitmentService:
             job = job_doc.to_dict()
             company_id = job['company_id']
 
+            candidate_doc = self.db.collection('users').document(candidate_id).get()
+            company_doc = self.db.collection('users').document(company_id).get()
+            company_data = company_doc.to_dict() if company_doc.exists else {}
+            now = datetime.now(timezone.utc)
+
             application_data = {
                 'candidate_id': candidate_id,
                 'job_id': job_id,
                 'company_id': company_id,
+                'job_title': job.get('title', 'Offre sans titre'),
+                'company_name': company_data.get('companyName') or company_data.get('name') or 'Entreprise',
+                'candidate_name': display_name(candidate_doc.to_dict() if candidate_doc.exists else None),
                 'status': 'pending',
-                'submitted_at': datetime.now(),
+                'applied_at': now,
+                'submitted_at': now,  # conservé pour compatibilité avec les anciennes candidatures
+                'is_quick_apply': False,
                 'resume_url': resume_url,
                 'urgency': 'normal',  # Default, can be set based on logic
                 'motivation': motivation,
@@ -62,6 +74,27 @@ class RecruitmentService:
             logger.error(f"Error fetching recruitment metrics: {str(e)}")
             return metrics
 
+    def _enrich_application(self, doc, with_candidate=True):
+        """Convertit un document Firestore en dict prêt à l'affichage (dates, titre de l'offre, nom du candidat)."""
+        data = doc.to_dict()
+        data['application_id'] = doc.id
+
+        # `applied_at` est le champ de référence ; `submitted_at` reste lu pour les anciennes candidatures
+        applied_at = application_date(data, default=datetime.now(timezone.utc))
+        data['applied_at'] = applied_at
+        data['submitted_at'] = applied_at
+
+        job_doc = self.db.collection('jobs').document(data['job_id']).get()
+        data['job_title'] = job_doc.to_dict().get('title', 'Unknown') if job_doc.exists else 'Unknown'
+
+        if with_candidate:
+            candidate_doc = self.db.collection('users').document(data['candidate_id']).get()
+            data['candidate_name'] = display_name(
+                candidate_doc.to_dict() if candidate_doc.exists else None,
+                fallback='Candidat ' + data['candidate_id'][:8]
+            )
+        return data
+
     def get_all_applications(self, user_id):
         """Fetch all applications for a company's jobs."""
         try:
@@ -70,27 +103,7 @@ class RecruitmentService:
             applications_docs = applications_ref.stream()
             applications = []
             for doc in applications_docs:
-                data = doc.to_dict()
-                data['application_id'] = doc.id
-                # Handle Firestore timestamp (DatetimeWithNanoseconds)
-                if isinstance(data['submitted_at'], datetime):
-                    data['submitted_at'] = data['submitted_at']
-                else:
-                    logger.warning(f"Unexpected submitted_at type: {type(data['submitted_at'])}")
-                    data['submitted_at'] = datetime.now()  # Fallback
-                # Fetch job title for display
-                job_doc = self.db.collection('jobs').document(data['job_id']).get()
-                data['job_title'] = job_doc.to_dict().get('title', 'Unknown') if job_doc.exists else 'Unknown'
-                # Fetch candidate name from users collection
-                candidate_doc = self.db.collection('users').document(data['candidate_id']).get()
-                data['candidate_name'] = candidate_doc.to_dict().get('name', 'Candidat ' + data['candidate_id'][
-                                                                                           :8]) if candidate_doc.exists else 'Candidat ' + \
-                                                                                                                             data[
-                                                                                                                                 'candidate_id'][
-                                                                                                                             :8]
-                logger.debug(
-                    f"Retrieved application: ID={data['application_id']}, Job={data['job_title']}, Candidate={data['candidate_name']}, Status={data['status']}")
-                applications.append(data)
+                applications.append(self._enrich_application(doc))
             logger.info(f"Total applications retrieved for company {user_id}: {len(applications)}")
             return applications
         except Exception as e:
@@ -105,27 +118,7 @@ class RecruitmentService:
             applications_docs = applications_ref.stream()
             applications = []
             for doc in applications_docs:
-                data = doc.to_dict()
-                data['application_id'] = doc.id
-                # Handle Firestore timestamp (DatetimeWithNanoseconds)
-                if isinstance(data['submitted_at'], datetime):
-                    data['submitted_at'] = data['submitted_at']
-                else:
-                    logger.warning(f"Unexpected submitted_at type: {type(data['submitted_at'])}")
-                    data['submitted_at'] = datetime.now()  # Fallback
-                # Fetch job title for display
-                job_doc = self.db.collection('jobs').document(data['job_id']).get()
-                data['job_title'] = job_doc.to_dict().get('title', 'Unknown') if job_doc.exists else 'Unknown'
-                # Fetch candidate name from users collection
-                candidate_doc = self.db.collection('users').document(data['candidate_id']).get()
-                data['candidate_name'] = candidate_doc.to_dict().get('name', 'Candidat ' + data['candidate_id'][
-                                                                                           :8]) if candidate_doc.exists else 'Candidat ' + \
-                                                                                                                             data[
-                                                                                                                                 'candidate_id'][
-                                                                                                                             :8]
-                logger.debug(
-                    f"Retrieved application: ID={data['application_id']}, Job={data['job_title']}, Candidate={data['candidate_name']}, Status={data['status']}")
-                applications.append(data)
+                applications.append(self._enrich_application(doc))
             logger.info(f"Total applications retrieved for job {job_id}: {len(applications)}")
             return applications
         except Exception as e:
@@ -140,8 +133,8 @@ class RecruitmentService:
             active_jobs = len(g.job_service.get_jobs_by_company(user_id, limit=None))  # Use JobService from app context
             # Count pending and urgent applications
             applications = self.get_all_applications(user_id)
-            pending_applications = sum(1 for app in applications if app['status'] == 'pending')
-            urgent_applications = sum(1 for app in applications if app['urgency'] == 'high')
+            pending_applications = sum(1 for app in applications if app.get('status') == 'pending')
+            urgent_applications = sum(1 for app in applications if app.get('urgency') == 'high')
             # Mock average hiring time (calculate from closed jobs if needed)
             avg_hiring_time = 8  # Static for now, replace with real calculation
 
@@ -171,18 +164,7 @@ class RecruitmentService:
             applications_docs = applications_ref.stream()
             applications = []
             for doc in applications_docs:
-                data = doc.to_dict()
-                data['application_id'] = doc.id
-                # Handle Firestore timestamp
-                if isinstance(data['submitted_at'], datetime):
-                    data['submitted_at'] = data['submitted_at']
-                else:
-                    logger.warning(f"Unexpected submitted_at type: {type(data['submitted_at'])}")
-                    data['submitted_at'] = datetime.now()  # Fallback
-                job_doc = self.db.collection('jobs').document(data['job_id']).get()
-                data['job_title'] = job_doc.to_dict().get('title', 'Unknown') if job_doc.exists else 'Unknown'
-                logger.debug(f"Retrieved user application: {data}")
-                applications.append(data)
+                applications.append(self._enrich_application(doc, with_candidate=False))
             logger.info(f"Total user applications retrieved for user {user_id}: {len(applications)}")
             return applications
         except Exception as e:

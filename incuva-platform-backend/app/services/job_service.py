@@ -1,6 +1,8 @@
 from firebase_admin import firestore
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
+
+from ..utils.recruitment_utils import to_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +69,7 @@ class JobService:
             for doc in jobs_docs:
                 data = doc.to_dict()
                 data['job_id'] = doc.id
-                data['created_at'] = data['created_at'].to_datetime() if hasattr(data['created_at'],
-                                                                                 'to_datetime') else datetime.now()
+                data['created_at'] = to_datetime(data.get('created_at'), default=datetime.now(timezone.utc))
                 jobs.append(data)
             logger.debug(f"Found jobs: {jobs}")
             return jobs
