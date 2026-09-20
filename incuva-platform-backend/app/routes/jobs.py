@@ -37,9 +37,17 @@ def apply_job_api(job_id):
     if not user_doc.exists or user_doc.to_dict().get('accountType') != 'individual':
         return jsonify({'success': False, 'error': 'Seuls les utilisateurs individuels peuvent postuler'}), 403
 
-    job_doc = g.db.collection('jobs').document(job_id).get()
+        job_doc = g.db.collection('jobs').document(job_id).get()
     if not job_doc.exists:
         return jsonify({'success': False, 'error': 'Offre non trouvée'}), 404
+
+    # Empêcher une double candidature à la même offre
+    existing = g.db.collection('applications') \
+        .where('candidate_id', '==', user_id) \
+        .where('job_id', '==', job_id) \
+        .limit(1).get()
+    if len(existing) > 0:
+        return jsonify({'success': False, 'error': 'Vous avez déjà postulé à cette offre.'}), 409
 
     # Récupérer les fichiers et champs
     resume = request.files.get('resume')
