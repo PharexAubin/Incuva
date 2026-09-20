@@ -6,7 +6,7 @@ import {
   Loader2,
   UserCheck,
 } from "lucide-react";
-import { initiateChat, addFavorite, removeFavorite } from "../../services/hr";
+import { initiateChat, addFavorite, removeFavorite, getTalentCvUrl } from "../../services/hr";
 
 // IMPORTS DES NOUVEAUX COMPOSANTS MODULAIRES
 import HeaderProfil from "../HR/ProfilDetail/composants/HeaderProfil.jsx";
@@ -30,6 +30,22 @@ export default function ProfilDetail() {
   const [error, setError] = useState("");
   const [isFavorite, setIsFavorite] = useState(false);
   const [showCvModal, setShowCvModal] = useState(false);
+  const [signedCvUrl, setSignedCvUrl] = useState(null);
+  const [cvError, setCvError] = useState("");
+
+  // Lien temporaire vers le CV (le bucket S3 n'est pas public), demandé à l'ouverture de la modale
+  useEffect(() => {
+    if (!showCvModal) return;
+    let cancelled = false;
+    setSignedCvUrl(null);
+    setCvError("");
+    getTalentCvUrl(talentId).then((res) => {
+      if (cancelled) return;
+      if (res.success) setSignedCvUrl(res.url);
+      else setCvError(res.error || "Impossible d'ouvrir le CV");
+    });
+    return () => { cancelled = true; };
+  }, [showCvModal, talentId]);
 
   useEffect(() => {
     const fetchTalentDetail = async () => {
@@ -148,6 +164,7 @@ export default function ProfilDetail() {
             <SectionCV
                 cvUrl={talent.cvUrl}
                 cvName={talent.cvName}
+                talentId={talentId}
                 setShowCvModal={setShowCvModal} // Passer le setter d'état
             />
           </div>
@@ -166,8 +183,10 @@ export default function ProfilDetail() {
       {/* MODALE DE PRÉVISUALISATION DU CV */}
       {showCvModal && (
         <CvPreviewModal
-          cvUrl={talent.cvUrl}
+          cvUrl={signedCvUrl}
           cvName={talent.cvName}
+          loading={!signedCvUrl && !cvError}
+          error={cvError}
           onClose={() => setShowCvModal(false)}
         />
       )}

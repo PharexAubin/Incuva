@@ -4,11 +4,12 @@ from datetime import datetime, timedelta, timezone
 import logging
 import os
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
 from werkzeug.utils import secure_filename
 from flask import current_app
 
 from ..utils.recruitment_utils import to_datetime, application_date, display_name
+from ..utils.s3_utils import key_from_url, owns_key, presigned_get_url
 
 
 jobs_bp = Blueprint('jobs', __name__, url_prefix='/jobs')
@@ -484,6 +485,49 @@ def api_get_job_applications(job_id):
     except Exception as e:
         logger.error(f"Error fetching applications for job {job_id}: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@jobs_bp.route('/api/application/<application_id>/document/<doc_type>', methods=['GET'])
+def api_application_document_url(application_id, doc_type):
+    """Lien temporaire vers le CV ou la lettre de motivation (PDF) d'une candidature.
+
+    Accessible à l'entreprise qui a reçu la candidature et au candidat qui l'a envoyée.
+    """
+    if 'uid' not in session:
+        return jsonify({'success': False, 'error': 'Utilisateur non authentifié'}), 401
+
+    fields = {'resume': 'resume_url', 'motivation': 'motivation'}
+    if doc_type not in fields:
+        return jsonify({'success': False, 'error': 'Type de document invalide'}), 400
+
+    application_doc = g.db.collection('applications').document(application_id).get()
+    if not application_doc.exists:
+        return jsonify({'success': False, 'error': 'Candidature non trouvée'}), 404
+
+    application = application_doc.to_dict()
+    uid = session['uid']
+    if uid not in (application.get('company_id'), application.get('candidate_id')):
+        return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
+
+    doc_url = application.get(fields[doc_type])
+    if not doc_url or not doc_url.startswith('http'):
+        return jsonify({'success': False, 'error': 'Document non disponible'}), 404
+
+    key = key_from_url(doc_url)
+    if key is None:
+        # URL hors de notre bucket (ancien format, lien externe) : renvoyée telle quelle
+        return jsonify({'success': True, 'url': doc_url})
+
+    # Le fichier doit appartenir au candidat : empêche de faire signer la clé d'un autre utilisateur
+    if not owns_key(key, application.get('candidate_id')):
+        logger.warning(f"Document {key} ne correspond pas au candidat de la candidature {application_id}")
+        return jsonify({'success': False, 'error': 'Document non autorisé'}), 403
+
+    try:
+        return jsonify({'success': True, 'url': presigned_get_url(key)})
+    except (ClientError, BotoCoreError) as e:
+        logger.error(f"Erreur génération lien document {key}: {e}")
+        return jsonify({'success': False, 'error': 'Impossible de générer le lien du document'}), 500
 
 
 # === NOUVELLE ROUTE : Mettre à jour une offre ===

@@ -176,5 +176,18 @@ export default {
   getRejections,
 };
 
-
-
+/**
+ * 🔹 Lien temporaire vers le CV d'un talent (bucket S3 non public)
+ * @param {string} talentId
+ * @returns {Promise<object>} { success, url, error }
+ */
+export async function getTalentCvUrl(talentId) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/talent_cv_url/${talentId}`, { credentials: "include" });
+    const data = await res.json();
+    if (!res.ok || !data.success) return { success: false, error: data.error || "CV indisponible" };
+    return { success: true, url: data.url };
+  } catch (err) {
+    return { success: false, error: "Erreur réseau" };
+  }
+}

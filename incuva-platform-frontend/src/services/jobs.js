@@ -173,6 +173,26 @@ export async function getMyApplications() {
   }
 }
 
+/**
+ * Lien temporaire vers un document d'une candidature (bucket S3 non public)
+ * @param {string} applicationId
+ * @param {'resume'|'motivation'} docType
+ * @returns {Promise<Object>} - { success, url, error }
+ */
+export async function getApplicationDocumentUrl(applicationId, docType) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/application/${applicationId}/document/${docType}`, {
+      credentials: 'include',
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) return { success: false, error: data.error || 'Document indisponible' };
+    return { success: true, url: data.url };
+  } catch (error) {
+    console.error('Erreur getApplicationDocumentUrl:', error);
+    return { success: false, error: 'Erreur réseau' };
+  }
+}
+
 export async function getRecruitmentInsights() {
   try {
     const response = await fetch(`${API_BASE_URL}/insights`);

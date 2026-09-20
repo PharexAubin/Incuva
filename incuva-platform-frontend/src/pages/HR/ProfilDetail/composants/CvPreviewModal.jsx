@@ -1,9 +1,7 @@
 import React from 'react';
 import { X, FileText } from 'lucide-react';
 
-export default function CvPreviewModal({ cvUrl, cvName, onClose }) {
-  if (!cvUrl) return null;
-
+export default function CvPreviewModal({ cvUrl, cvName, onClose, loading = false, error = "" }) {
   return (
     <div
       className="fixed inset-0 bg-black bg-opacity-75 z-50 flex justify-center items-center p-4"
@@ -29,19 +27,20 @@ export default function CvPreviewModal({ cvUrl, cvName, onClose }) {
 
         {/* Contenu de l'Aperçu (Iframe) */}
         <div className="flex-1">
-          <iframe
-            src={cvUrl}
-            title={`Aperçu du CV - ${cvName}`}
-            className="w-full h-full border-0"
-            frameBorder="0"
-          >
-            <div className="p-8 text-center text-gray-500">
-                Votre navigateur ne prend pas en charge l'affichage des PDF.
-                <a href={cvUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline ml-2">
-                    Télécharger le CV
-                </a>
-            </div>
-          </iframe>
+          {loading && (
+            <div className="p-8 text-center text-gray-500">Chargement du CV...</div>
+          )}
+          {error && (
+            <div className="p-8 text-center text-red-600">{error}</div>
+          )}
+          {cvUrl && (
+            <iframe
+              src={cvUrl}
+              title={`Aperçu du CV - ${cvName}`}
+              className="w-full h-full border-0"
+              frameBorder="0"
+            />
+          )}
         </div>
       </div>
     </div>

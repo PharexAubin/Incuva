@@ -1,7 +1,7 @@
 // src/pages/Jobs/CandidateView.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getJobList, getJobApplications } from "../../services/jobs";
+import { getJobList, getJobApplications, getApplicationDocumentUrl } from "../../services/jobs";
 import { Briefcase, Users, X, MessageCircle, Clock, CheckCircle, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -17,6 +17,7 @@ export default function CandidateView() {
   const [selectedJob, setSelectedJob] = useState(null);
   const [candidateModalOpen, setCandidateModalOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [docError, setDocError] = useState("");
 
   const toJSDate = (ts) => {
       if (!ts) return null;
@@ -66,6 +67,20 @@ export default function CandidateView() {
   const openCandidateModal = (candidate) => {
     setSelectedCandidate(candidate);
     setCandidateModalOpen(true);
+  };
+
+  // Ouvre un document via un lien temporaire (le bucket S3 n'est pas public)
+  const openDocument = async (applicationId, docType) => {
+    setDocError("");
+    const tab = window.open("", "_blank"); // ouvert tout de suite pour ne pas être bloqué par le navigateur
+    const res = await getApplicationDocumentUrl(applicationId, docType);
+    if (res.success) {
+      if (tab) tab.location.href = res.url;
+      else window.location.href = res.url;
+    } else {
+      if (tab) tab.close();
+      setDocError(res.error || "Impossible d'ouvrir le document");
+    }
   };
 
   const openChat = async (candidateId, jobId) => {
@@ -232,14 +247,14 @@ export default function CandidateView() {
 
               <div>
                 <p className="font-semibold text-gray-700 mb-1">CV</p>
-                <a
-                  href={selectedCandidate.resume_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => openDocument(selectedCandidate.application_id, "resume")}
                   className="text-orange-600 hover:underline text-sm"
                 >
                   Télécharger le CV
-                </a>
+                </button>
+                {docError && <p className="text-sm text-red-600 mt-1">{docError}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4 text-sm">

@@ -2,7 +2,9 @@ from flask import Blueprint, session, request, jsonify, g
 import logging
 import re
 from firebase_admin import firestore
+from botocore.exceptions import ClientError, BotoCoreError
 from ..firebase.init_firebase import db
+from ..utils.s3_utils import key_from_url, owns_key, presigned_get_url
 
 logger = logging.getLogger(__name__)
 hr_bp = Blueprint('hr', __name__, url_prefix='/hr')
@@ -235,6 +237,33 @@ def talent_detail_api(talent_id):
         import traceback
         traceback.print_exc()  # Utile pour débugger en prod
         return jsonify({'success': False, 'error': 'Erreur serveur'}), 500
+
+
+@hr_bp.route('/talent_cv_url/<talent_id>', methods=['GET'])
+def talent_cv_url_api(talent_id):
+    """Lien temporaire vers le CV d'un talent (réservé aux entreprises, comme talent_detail)."""
+    if 'uid' not in session or session.get('account_type') != 'company':
+        return jsonify({'success': False, 'error': 'Utilisateur non authentifié'}), 401
+
+    talent_doc = db.collection('users').document(talent_id).get()
+    if not talent_doc.exists:
+        return jsonify({'success': False, 'error': 'Talent non trouvé'}), 404
+
+    cv_url = talent_doc.to_dict().get('cvUrl') or talent_doc.to_dict().get('cv_url')
+    if not cv_url:
+        return jsonify({'success': False, 'error': 'Aucun CV enregistré'}), 404
+
+    key = key_from_url(cv_url)
+    if key is None:
+        return jsonify({'success': True, 'url': cv_url})
+    if not owns_key(key, talent_id):
+        return jsonify({'success': False, 'error': 'Document non autorisé'}), 403
+
+    try:
+        return jsonify({'success': True, 'url': presigned_get_url(key)})
+    except (ClientError, BotoCoreError) as e:
+        logger.error(f"Erreur génération lien CV talent {talent_id}: {e}")
+        return jsonify({'success': False, 'error': 'Impossible de générer le lien du CV'}), 500
 
 
 @hr_bp.route('/initiate_chat', methods=['POST'])

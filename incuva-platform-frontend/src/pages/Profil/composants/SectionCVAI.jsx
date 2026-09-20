@@ -6,11 +6,60 @@ import {
   GraduationCap, FileText, Copy
 } from 'lucide-react';
 
+const normalize = (value) => (value || '').toString().trim().toLowerCase();
+
+// formData.skills est une chaîne "a, b, c" (convertie en liste à la sauvegarde) : on fusionne sans doublons
+const mergeSkills = (current, incoming) => {
+  const list = (Array.isArray(current) ? current : (current || '').split(','))
+    .map(skill => skill.trim())
+    .filter(Boolean);
+  const seen = new Set(list.map(normalize));
+  incoming.forEach(skill => {
+    const clean = (skill || '').trim();
+    if (clean && !seen.has(normalize(clean))) {
+      seen.add(normalize(clean));
+      list.push(clean);
+    }
+  });
+  return list.join(', ');
+};
+
+// Ajoute les éléments détectés qui n'existent pas déjà (comparaison sur les champs `keys`)
+const mergeUnique = (existing, incoming, keys) => {
+  const merged = [...(existing || [])];
+  incoming.forEach(item => {
+    if (!merged.some(e => keys.every(key => normalize(e[key]) === normalize(item[key])))) {
+      merged.push(item);
+    }
+  });
+  return merged;
+};
+
+// Fonction pure : renvoie le formulaire mis à jour avec une section de l'analyse IA
+const mergeSection = (prev, section, ai, overwriteBio) => {
+  switch (section) {
+    case 'skills':
+      return ai.skills?.length ? { ...prev, skills: mergeSkills(prev.skills, ai.skills) } : prev;
+    case 'bio':
+      return ai.summary && (overwriteBio || !prev.bio || prev.bio.length < 50)
+        ? { ...prev, bio: ai.summary }
+        : prev;
+    case 'experience':
+      return ai.experience?.length
+        ? { ...prev, experience: mergeUnique(prev.experience, ai.experience, ['title', 'company']) }
+        : prev;
+    case 'education':
+      return ai.education?.length
+        ? { ...prev, education: mergeUnique(prev.education, ai.education, ['degree', 'school']) }
+        : prev;
+    default:
+      return prev;
+  }
+};
+
 const SectionCVAI = ({
   formData,
   isEditing,
-  handleChange,
-  handleArrayChange,
   cvUrl,
   cvName,
   setFormData
@@ -51,131 +100,30 @@ const SectionCVAI = ({
     }
   };
 
+  // Tout passe par un seul setFormData(prev => ...) : plusieurs mises à jour d'affilée ne s'écrasent plus
   const applyAIAnalysis = () => {
     if (!aiResults || !isEditing) return;
 
     setApplying(true);
-
     try {
-      // Mettre à jour les compétences
-      if (aiResults.skills && aiResults.skills.length > 0) {
-        const currentSkills = formData.skills || '';
-        const aiSkills = aiResults.skills.join(', ');
-
-        // Fusionner les compétences existantes avec celles de l'IA
-        const mergedSkills = currentSkills
-          ? `${currentSkills}, ${aiSkills}`
-          : aiSkills;
-
-        handleChange({
-          target: { name: 'skills', value: mergedSkills }
-        });
-      }
-
-      // Mettre à jour la bio si elle est vide ou presque
-      if (aiResults.summary && (!formData.bio || formData.bio.length < 50)) {
-        handleChange({
-          target: { name: 'bio', value: aiResults.summary }
-        });
-      }
-
-      // Ajouter les expériences
-      if (aiResults.experience && aiResults.experience.length > 0) {
-        const existingExp = formData.experience || [];
-
-        // Filtrer pour éviter les doublons
-        const newExperiences = aiResults.experience.filter(newExp =>
-          !existingExp.some(existing =>
-            existing.title === newExp.title &&
-            existing.company === newExp.company
-          )
-        );
-
-        if (newExperiences.length > 0) {
-          const updatedExperience = [...existingExp, ...newExperiences];
-          handleArrayChange('experience', updatedExperience.length - 1, 'title', newExperiences[0].title);
-          // Note: On ne peut pas directement mettre à jour le tableau via handleArrayChange
-          // On va plutôt mettre à jour formData directement
-          setFormData(prev => ({
-            ...prev,
-            experience: updatedExperience
-          }));
-        }
-      }
-
-      // Ajouter les formations
-      if (aiResults.education && aiResults.education.length > 0) {
-        const existingEdu = formData.education || [];
-
-        const newEducation = aiResults.education.filter(newEdu =>
-          !existingEdu.some(existing =>
-            existing.degree === newEdu.degree &&
-            existing.school === newEdu.school
-          )
-        );
-
-        if (newEducation.length > 0) {
-          const updatedEducation = [...existingEdu, ...newEducation];
-          setFormData(prev => ({
-            ...prev,
-            education: updatedEducation
-          }));
-        }
-      }
-
-      // Mettre à jour les résultats pour montrer ce qui a été appliqué
-      setAiResults(prev => ({
-        ...prev,
-        applied: true
-      }));
-
-      setApplying(false);
-
-    } catch (error) {
-      console.error('Erreur lors de l\'application des données IA:', error);
-      setError('Erreur lors de l\'application des données');
+      setFormData(prev =>
+        ['skills', 'bio', 'experience', 'education'].reduce(
+          (acc, section) => mergeSection(acc, section, aiResults, false),
+          prev
+        )
+      );
+      setAiResults(prev => ({ ...prev, applied: true }));
+    } catch (err) {
+      console.error("Erreur lors de l'application des données IA:", err);
+      setError("Erreur lors de l'application des données");
+    } finally {
       setApplying(false);
     }
   };
 
-  const applySpecificSection = (section, data) => {
-    switch(section) {
-      case 'skills':
-        const currentSkills = formData.skills || '';
-        const newSkills = data.join(', ');
-        const mergedSkills = currentSkills
-          ? `${currentSkills}, ${newSkills}`
-          : newSkills;
-
-        handleChange({
-          target: { name: 'skills', value: mergedSkills }
-        });
-        break;
-
-      case 'bio':
-        handleChange({
-          target: { name: 'bio', value: data }
-        });
-        break;
-
-      case 'experience':
-        const existingExp = formData.experience || [];
-        const updatedExperience = [...existingExp, ...data];
-        setFormData(prev => ({
-          ...prev,
-          experience: updatedExperience
-        }));
-        break;
-
-      case 'education':
-        const existingEdu = formData.education || [];
-        const updatedEducation = [...existingEdu, ...data];
-        setFormData(prev => ({
-          ...prev,
-          education: updatedEducation
-        }));
-        break;
-    }
+  const applySpecificSection = (section) => {
+    if (!aiResults) return;
+    setFormData(prev => mergeSection(prev, section, aiResults, true));
   };
 
   return (
@@ -266,7 +214,7 @@ const SectionCVAI = ({
                 </div>
                 {isEditing && (
                   <button
-                    onClick={() => applySpecificSection('skills', aiResults.skills)}
+                    onClick={() => applySpecificSection('skills')}
                     className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
                   >
                     <Copy className="w-4 h-4" />
@@ -291,7 +239,7 @@ const SectionCVAI = ({
                 </div>
                 {isEditing && aiResults.experience?.length > 0 && (
                   <button
-                    onClick={() => applySpecificSection('experience', aiResults.experience)}
+                    onClick={() => applySpecificSection('experience')}
                     className="text-sm text-green-600 hover:text-green-700 flex items-center gap-1"
                   >
                     <Copy className="w-4 h-4" />
@@ -316,7 +264,7 @@ const SectionCVAI = ({
                 </div>
                 {isEditing && aiResults.education?.length > 0 && (
                   <button
-                    onClick={() => applySpecificSection('education', aiResults.education)}
+                    onClick={() => applySpecificSection('education')}
                     className="text-sm text-purple-600 hover:text-purple-700 flex items-center gap-1"
                   >
                     <Copy className="w-4 h-4" />
@@ -336,7 +284,7 @@ const SectionCVAI = ({
                 </p>
                 {isEditing && aiResults.summary && (
                   <button
-                    onClick={() => applySpecificSection('bio', aiResults.summary)}
+                    onClick={() => applySpecificSection('bio')}
                     className="text-sm text-amber-600 hover:text-amber-700 flex items-center gap-1"
                   >
                     <Copy className="w-4 h-4" />
@@ -345,6 +293,17 @@ const SectionCVAI = ({
                 )}
               </div>
             </div>
+
+            {!isEditing && (
+              <p className="text-sm text-gray-600 text-center">
+                Cliquez sur « Modifier » pour ajouter ces informations à votre profil.
+              </p>
+            )}
+            {aiResults.applied && (
+              <p className="mb-3 text-sm text-green-700 text-center">
+                Informations ajoutées au formulaire. Cliquez sur « Sauvegarder » pour les enregistrer.
+              </p>
+            )}
 
             {/* Bouton pour appliquer tout */}
             {isEditing && (

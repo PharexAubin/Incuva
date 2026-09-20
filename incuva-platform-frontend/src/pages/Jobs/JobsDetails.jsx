@@ -1,7 +1,7 @@
 // src/pages/Jobs/JobsDetails.jsx
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getJobDetail, getJobApplications, updateApplicationStatus } from "../../services/jobs";
+import { getJobDetail, getJobApplications, updateApplicationStatus, getApplicationDocumentUrl } from "../../services/jobs";
 import {
   Briefcase, MapPin, DollarSign, Calendar, Users, X,
   ChevronRight, CheckCircle, XCircle, Clock, ArrowLeft,
@@ -31,6 +31,8 @@ export default function JobsDetails() {
 
   // Modale prévisualisation document
   const [viewingDoc, setViewingDoc] = useState(null); // { url, title }
+  const [docLoading, setDocLoading] = useState(false);
+  const [docError, setDocError] = useState('');
 
   const [updating, setUpdating] = useState(null);
 
@@ -155,8 +157,23 @@ export default function JobsDetails() {
 
   const getFileExtension = (url) => {
       if (!url) return '';
-      const parts = url.split('.');
+      const parts = url.split(/[?#]/)[0].split('.');
       return parts.length > 1 ? parts.pop().toLowerCase() : '';
+  };
+
+  // Ouvre un document de la candidature via un lien temporaire (le bucket S3 n'est pas public)
+  const openDocument = async (docType, title, fallbackUrl) => {
+    setDocError('');
+    setDocLoading(true);
+    const res = await getApplicationDocumentUrl(selectedCandidate.application_id, docType);
+    setDocLoading(false);
+    if (res.success) {
+      setViewingDoc({ url: res.url, title, type: getFileExtension(res.url) });
+    } else if (fallbackUrl) {
+      setViewingDoc({ url: fallbackUrl, title, type: getFileExtension(fallbackUrl) });
+    } else {
+      setDocError(res.error || "Impossible d'ouvrir le document");
+    }
   };
 
   if (loading) {
@@ -594,13 +611,10 @@ export default function JobsDetails() {
                   {/* Bouton CV */}
                   {selectedCandidate.resume_url && (
                     <button
+                      disabled={docLoading}
                       onClick={(e) => {
                         e.stopPropagation();
-                        setViewingDoc({
-                          url: selectedCandidate.resume_url,
-                          title: `CV de ${selectedCandidate.candidate_name}`,
-                          type: getFileExtension(selectedCandidate.resume_url)
-                        });
+                        openDocument('resume', `CV de ${selectedCandidate.candidate_name}`);
                       }}
                       className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl hover:from-orange-600 hover:to-amber-600 transition-all shadow-sm"
                     >
@@ -612,10 +626,12 @@ export default function JobsDetails() {
                   {/* Bouton Lettre de Motivation (Si URL) */}
                   {(selectedCandidate.cover_letter_url || isUrl(selectedCandidate.motivation)) && (
                     <button
-                      onClick={() => setViewingDoc({
-                        url: selectedCandidate.cover_letter_url || selectedCandidate.motivation,
-                        title: `Lettre de motivation - ${selectedCandidate.candidate_name}`
-                      })}
+                      disabled={docLoading}
+                      onClick={() => openDocument(
+                        'motivation',
+                        `Lettre de motivation - ${selectedCandidate.candidate_name}`,
+                        selectedCandidate.cover_letter_url
+                      )}
                       className="flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl hover:from-blue-600 hover:to-indigo-600 transition-all shadow-sm"
                     >
                       <Eye className="w-4 h-4" />
@@ -623,6 +639,8 @@ export default function JobsDetails() {
                     </button>
                   )}
                 </div>
+
+                {docError && <p className="mt-3 text-sm text-red-600">{docError}</p>}
 
                 {/* Si la motivation est du TEXTE (pas une URL), on l'affiche ici */}
                 {!isUrl(selectedCandidate.motivation) && selectedCandidate.motivation && (

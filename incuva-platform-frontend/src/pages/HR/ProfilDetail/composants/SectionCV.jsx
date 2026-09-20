@@ -1,9 +1,25 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FileText } from 'lucide-react';
 import { SectionHeader } from './Helpers';
+import { getTalentCvUrl } from '../../../../services/hr';
 
-export default function SectionCV({ cvUrl, cvName, setShowCvModal }) {
+export default function SectionCV({ cvUrl, cvName, talentId, setShowCvModal }) {
+  const [downloadError, setDownloadError] = useState('');
   if (!cvUrl) return null;
+
+  // Lien temporaire (le bucket S3 n'est pas public) ouvert dans un nouvel onglet
+  const handleDownload = async () => {
+    setDownloadError('');
+    const tab = window.open('', '_blank');
+    const res = await getTalentCvUrl(talentId);
+    if (res.success) {
+      if (tab) tab.location.href = res.url;
+      else window.location.href = res.url;
+    } else {
+      if (tab) tab.close();
+      setDownloadError(res.error || "Impossible d'ouvrir le CV");
+    }
+  };
 
   return (
     <div className="bg-white rounded-3xl shadow-xl p-8 border border-gray-100">
@@ -19,15 +35,14 @@ export default function SectionCV({ cvUrl, cvName, setShowCvModal }) {
       </button>
 
       {/* 2. Bouton "Télécharger" (Optionnel) */}
-      <a
-        href={cvUrl}
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        type="button"
+        onClick={handleDownload}
         className="ml-4 inline-flex items-center gap-2 text-indigo-600 font-semibold hover:underline"
-        download
       >
         Télécharger
-      </a>
+      </button>
+      {downloadError && <p className="mt-3 text-sm text-red-600">{downloadError}</p>}
     </div>
   );
 }
