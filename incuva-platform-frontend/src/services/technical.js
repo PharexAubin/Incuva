@@ -856,7 +856,7 @@ export async function handleTakeTest(testId, navigate, options = {}) {
     }
 
     // Option 2: Naviguer directement
-    navigate(`/api/technical-test/${testId}`, {
+    navigate(`/technical-test/${testId}`, {
       state: {
         testId: testId,
         ...options
@@ -866,5 +866,49 @@ export async function handleTakeTest(testId, navigate, options = {}) {
   } catch (error) {
     console.error('Erreur handleTakeTest:', error);
     throw error;
+  }
+}
+/**
+ * Assigne un test technique à une candidature ACCEPTÉE et l'annonce dans la conversation avec le candidat.
+ * Les erreurs métier renvoient un `code` : application_not_accepted, no_conversation, already_assigned...
+ * @param {string} applicationId
+ * @param {string} testId
+ * @returns {Promise<Object>} { success, data } ou { success: false, error, code }
+ */
+export async function assignTechnicalTest(applicationId, testId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/technical-tests/assign`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ application_id: applicationId, test_id: testId })
+    });
+
+    const data = await readJson(response);
+    if (!response.ok) return { success: false, error: data.error || "Erreur lors de l'envoi du test", code: data.code };
+    return { success: true, data: data.data };
+  } catch (error) {
+    console.error('Erreur assignTechnicalTest:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Tests assignés à une candidature, avec leur résultat (fiche de candidature côté entreprise)
+ * @param {string} applicationId
+ * @returns {Promise<Object>} { success, data: [{ id, test_title, status, result, attempt }] }
+ */
+export async function getApplicationTests(applicationId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/applications/${applicationId}/tests`, {
+      credentials: 'include'
+    });
+
+    const data = await readJson(response);
+    if (!response.ok) return { success: false, error: data.error || 'Erreur lors de la récupération des tests' };
+    return { success: true, data: data.data || [] };
+  } catch (error) {
+    console.error('Erreur getApplicationTests:', error);
+    return { success: false, error: error.message };
   }
 }

@@ -10,6 +10,8 @@ import json
 import uuid
 import requests
 
+from ..services.test_assignment_service import TestAssignmentService
+
 logger = logging.getLogger(__name__)
 messaging_bp = Blueprint('messaging', __name__, url_prefix='/messaging', template_folder='templates/messaging')
 
@@ -68,10 +70,24 @@ def api_conversation(chat_id):
             current_user_name = current_user_data.get('companyName') or current_user_name
         current_account_type = current_user_doc.to_dict().get('accountType',
                                                               'individual') if current_user_doc.exists else 'individual'
+
+        # Tests techniques assignés dans cette conversation (cartes du fil + barre épinglée) ; le candidat ne
+        # voit la note que si le test l'autorise. Ne doit jamais empêcher l'affichage des messages.
+        try:
+            assignment_service = TestAssignmentService(g.db, g.messaging_service)
+            test_assignments = assignment_service.with_results(
+                assignment_service.list_for_chat(chat_id),
+                hide_scores_if_not_shown=(current_account_type != 'company')
+            )
+        except Exception as assignment_error:
+            logger.error(f"Erreur récupération des tests assignés du chat {chat_id}: {assignment_error}")
+            test_assignments = []
+
         return jsonify({
             'success': True,
             'chat_id': chat_id,
             'messages': messages,
+            'test_assignments': test_assignments,
             'otherParticipantName': other_name,
             'serviceId': chat_data.get('serviceId'),
             'other_participant_id': other_id,

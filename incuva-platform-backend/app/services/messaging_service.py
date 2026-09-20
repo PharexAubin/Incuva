@@ -197,6 +197,41 @@ class MessagingService:
             f"Not selected message sent in chat {chat_id}: {message_id}, job_id: {not_selected_details.get('job_id')}")
         return message_id
 
+    def send_test_assignment_message(self, chat_id, sender_id, receiver_id, test_details):
+        """Annonce dans la conversation qu'un test technique a été assigné au candidat."""
+        content = f"📝 Test technique assigné — {test_details['test_title']}"
+        message_data = {
+            'content': content,
+            'senderId': sender_id,
+            'receiverId': receiver_id,
+            'timestamp': firestore.SERVER_TIMESTAMP,
+            'isRead': False,
+            'imageUrl': None,
+            'videoUrl': None,
+            'documentUrl': None,
+            'documentName': None,
+            'audioUrl': None,
+            'type': 'technical_test',
+            'assignment_id': test_details['assignment_id'],
+            'test_id': test_details['test_id'],
+            'test_title': test_details['test_title'],
+            'job_id': test_details.get('job_id'),
+            'deletedFor': []
+        }
+        _, message_ref = self.db.collection('chats').document(chat_id).collection('messages').add(message_data)
+
+        self.db.collection('chats').document(chat_id).update({
+            'lastMessage': content,
+            'lastMessageDocumentName': None,
+            'lastMessageRead': False,
+            'lastMessageSenderId': sender_id,
+            'lastMessageTime': firestore.SERVER_TIMESTAMP,
+            'lastMessageType': 'technical_test',
+            'unreadCount_' + receiver_id: Increment(1)
+        })
+        logger.info(f"Test assignment message sent in chat {chat_id}: {message_ref.id}")
+        return message_ref.id
+
     def update_interview_message(self, chat_id, message_id, sender_id, receiver_id, interview_details):
         """Update an existing interview message with video call support."""
         message_data = {
@@ -337,6 +372,8 @@ class MessagingService:
                 last_message = 'Entretien planifié'
             elif data.get('lastMessageType') == 'contract':
                 last_message = f'Proposition de contrat: {data.get("lastMessage", "")}'
+            elif data.get('lastMessageType') == 'technical_test':
+                last_message = data.get('lastMessage', 'Test technique assigné')
             elif data.get('lastMessageType') == 'not_selected':
                 last_message = f'Candidature non retenue: {data.get("lastMessage", "")}'
             chats.append({

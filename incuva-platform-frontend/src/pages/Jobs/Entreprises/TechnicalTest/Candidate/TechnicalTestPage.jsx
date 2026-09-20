@@ -78,7 +78,10 @@ export default function TechnicalTestPage() {
       setError('');
 
       const res = await getTechnicalTest(testId);
-      if (res.success) {
+      if (res.success && res.data.can_submit === false) {
+        // Aperçu public : le test n'a pas été envoyé à ce compte, inutile de le faire remplir pour rien
+        setError("Ce test ne vous a pas été envoyé par l'entreprise : vous ne pouvez pas le passer.");
+      } else if (res.success) {
         setTest(res.data);
 
         // Initialiser les réponses

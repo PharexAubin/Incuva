@@ -5,7 +5,11 @@ import logging
 import json
 from datetime import datetime, timezone
 
-from ..utils.recruitment_utils import to_datetime
+from ..utils.recruitment_utils import to_datetime, display_name
+from ..services.messaging_service import MessagingService
+from ..services.test_assignment_service import (
+    TestAssignmentService, AssignmentError, sanitize_test_for_candidate
+)
 from ..ai.TestAI import generate_technical_test
 from ..ai.copilote import call_ia
 from ..firebase.init_firebase import db
@@ -13,6 +17,14 @@ from ..firebase.init_firebase import db
 logger = logging.getLogger(__name__)
 
 technical_test_bp = Blueprint('technical_test', __name__)
+
+
+def assignment_service():
+    return TestAssignmentService(db, MessagingService(db))
+
+
+def assignment_error_response(error):
+    return jsonify({'success': False, 'error': error.message, 'code': error.code}), error.status
 
 
 def newest_first(docs, field):
@@ -23,6 +35,55 @@ def newest_first(docs, field):
     """
     floor = datetime.min.replace(tzinfo=timezone.utc)
     return sorted(docs, key=lambda d: to_datetime(d.to_dict().get(field), default=floor), reverse=True)
+
+
+@technical_test_bp.route('/api/technical-tests/assign', methods=['POST'])
+@cross_origin(supports_credentials=True)
+def assign_technical_test():
+    """Assigne un test technique à une candidature ACCEPTÉE et l'annonce dans la conversation.
+
+    Les règles (candidature acceptée, propriété du test, offre, conversation existante) sont contrôlées
+    dans TestAssignmentService, pas seulement par l'interface.
+    """
+    if 'uid' not in session or session.get('account_type') != 'company':
+        return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
+
+    data = request.get_json(silent=True) or {}
+    application_id = data.get('application_id')
+    test_id = data.get('test_id')
+    if not application_id or not test_id:
+        return jsonify({'success': False, 'error': 'application_id et test_id requis'}), 400
+
+    try:
+        assignment = assignment_service().assign(session['uid'], application_id, test_id)
+        return jsonify({'success': True, 'data': assignment}), 201
+    except AssignmentError as e:
+        return assignment_error_response(e)
+    except Exception as e:
+        logger.error(f"Erreur assignation test: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@technical_test_bp.route('/api/applications/<application_id>/tests', methods=['GET'])
+@cross_origin(supports_credentials=True)
+def get_application_tests(application_id):
+    """Tests assignés à une candidature avec leur résultat (fiche de candidature côté entreprise)."""
+    if 'uid' not in session or session.get('account_type') != 'company':
+        return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
+
+    try:
+        application_doc = db.collection('applications').document(application_id).get()
+        if not application_doc.exists:
+            return jsonify({'success': False, 'error': 'Candidature non trouvée'}), 404
+        if application_doc.to_dict().get('company_id') != session['uid']:
+            return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
+
+        service = assignment_service()
+        assignments = service.with_results(service.list_for_application(application_id), include_attempt=True)
+        return jsonify({'success': True, 'data': assignments})
+    except Exception as e:
+        logger.error(f"Erreur récupération tests de la candidature {application_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @technical_test_bp.route('/api/technical-tests', methods=['POST'])
@@ -722,19 +783,28 @@ def get_technical_test(test_id):
         test_data = test_doc.to_dict()
         test_data['id'] = test_id
 
-        # Vérifier l'accès
-        if test_data.get('is_public', False):
-            # Test public - accessible à tous
-            pass
-        elif 'uid' not in session:
-            return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
-        else:
-            # Vérifier si l'utilisateur est le propriétaire ou un admin
-            is_owner = session['uid'] == test_data.get('company_id')
-            is_admin = session.get('account_type') == 'admin'
+        # Accès : propriétaire/admin = test complet ; candidat assigné ou aperçu public = test SANS les réponses
+        uid = session.get('uid')
+        is_owner = uid is not None and uid == test_data.get('company_id')
+        is_admin = session.get('account_type') == 'admin'
 
-            if not (is_owner or is_admin):
+        if not (is_owner or is_admin):
+            refusal = None
+            allowed = False
+            if uid:
+                try:
+                    assignment_service().check_can_submit(uid, test_id)
+                    allowed = True
+                except AssignmentError as e:
+                    refusal = e
+            # is_public ne donne plus qu'un aperçu : le passage du test exige une assignation
+            if not allowed and not test_data.get('is_public', False):
+                if refusal:
+                    return assignment_error_response(refusal)
                 return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
+            test_data = sanitize_test_for_candidate(test_data)
+            # Indique à la page si ce visiteur pourra soumettre (assignation valide) ou n'a qu'un aperçu
+            test_data['can_submit'] = allowed
 
         return jsonify({
             'success': True,
@@ -887,17 +957,11 @@ def submit_technical_test(test_id):
         if test_data.get('status') != 'active':
             return jsonify({'success': False, 'error': 'Ce test n\'est plus actif'}), 400
 
-        # Vérifier si l'utilisateur peut repasser le test
+        # Contrôle d'accès : le test doit avoir été assigné à ce candidat (is_public n'y change rien)
+        # et sa candidature doit toujours être acceptée
         user_id = session['uid']
-        attempts_query = db.collection('test_attempts') \
-            .where('test_id', '==', test_id) \
-            .where('candidate_id', '==', user_id) \
-            .stream()
-
-        attempts = list(attempts_query)
-
-        if attempts and not test_data.get('allow_retake', False):
-            return jsonify({'success': False, 'error': 'Vous avez déjà passé ce test'}), 400
+        service = assignment_service()
+        assignment = service.check_can_submit(user_id, test_id)
 
         # Évaluer les réponses
         total_score = 0
@@ -920,13 +984,15 @@ def submit_technical_test(test_id):
         percentage = (total_score / max_score * 100) if max_score > 0 else 0
         passed = percentage >= test_data.get('passing_score', 70)
 
-        # Enregistrer la tentative
+        # Enregistrer la tentative (avec le lien vers l'assignation et la candidature)
+        user_doc = db.collection('users').document(user_id).get()
+        user_data = user_doc.to_dict() if user_doc.exists else {}
         attempt_doc = {
             'test_id': test_id,
             'job_id': test_data.get('job_id'),
             'candidate_id': user_id,
-            'candidate_name': session.get('name', ''),
-            'candidate_email': session.get('email', ''),
+            'candidate_name': display_name(user_data, fallback=session.get('name', '')),
+            'candidate_email': user_data.get('email') or session.get('email', ''),
             'score': total_score,
             'max_score': max_score,
             'percentage': percentage,
@@ -936,8 +1002,8 @@ def submit_technical_test(test_id):
             'duration': data.get('duration', 0)  # temps passé en minutes
         }
 
-        attempt_ref = db.collection('test_attempts').document()
-        attempt_ref.set(attempt_doc)
+        # Tentative + passage de l'assignation à « submitted » dans une même transaction (pas de double soumission)
+        service.record_submission(assignment, attempt_doc, allow_retake=test_data.get('allow_retake', False))
 
         # Mettre à jour les statistiques du test
         test_ref.update({
@@ -961,6 +1027,8 @@ def submit_technical_test(test_id):
             }
         })
 
+    except AssignmentError as e:
+        return assignment_error_response(e)
     except Exception as e:
         logger.error(f"Erreur soumission test: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1607,7 +1675,11 @@ def manually_grade_attempt(test_id, attempt_id):
 @technical_test_bp.route('/api/jobs/<job_id>/available-tests', methods=['GET'])
 @cross_origin(supports_credentials=True)
 def get_available_tests_for_job(job_id):
-    """Récupère les tests techniques disponibles pour une offre d'emploi."""
+    """Tests techniques d'une offre.
+
+    - Entreprise propriétaire (ou admin) : les tests actifs de l'offre (choix du test à envoyer).
+    - Candidat : uniquement les tests qui LUI ont été assignés et qu'il n'a pas encore passés, sans les réponses.
+    """
     if 'uid' not in session:
         return jsonify({'success': False, 'error': 'Non authentifié'}), 401
 
@@ -1619,20 +1691,43 @@ def get_available_tests_for_job(job_id):
         if not job.exists:
             return jsonify({'success': False, 'error': 'Offre non trouvée'}), 404
 
-        # Récupérer les tests actifs pour cette offre
-        tests_query = newest_first(
-            db.collection('technical_tests')
-            .where('job_id', '==', job_id)
-            .where('status', '==', 'active')
-            .stream(),
-            'created_at'
-        )
+        uid = session['uid']
+        is_owner = uid == job.to_dict().get('company_id')
 
-        tests = []
-        for doc in tests_query:
-            test_data = doc.to_dict()
-            test_data['id'] = doc.id
-            tests.append(test_data)
+        if is_owner or session.get('account_type') == 'admin':
+            # Récupérer les tests actifs pour cette offre
+            tests_query = newest_first(
+                db.collection('technical_tests')
+                .where('job_id', '==', job_id)
+                .where('status', '==', 'active')
+                .stream(),
+                'created_at'
+            )
+
+            tests = []
+            for doc in tests_query:
+                test_data = doc.to_dict()
+                test_data['id'] = doc.id
+                tests.append(test_data)
+        elif session.get('account_type') == 'company':
+            return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
+        else:
+            service = assignment_service()
+            tests = []
+            for assignment in service.list_for_candidate_job(uid, job_id):
+                if assignment.get('status') != 'assigned':
+                    continue
+                try:
+                    service.check_can_submit(uid, assignment['test_id'])  # candidature toujours acceptée
+                except AssignmentError:
+                    continue
+                test_doc = db.collection('technical_tests').document(assignment['test_id']).get()
+                if not test_doc.exists or test_doc.to_dict().get('status') != 'active':
+                    continue
+                test_data = sanitize_test_for_candidate(test_doc.to_dict())
+                test_data['id'] = test_doc.id
+                test_data['assignment_id'] = assignment['id']
+                tests.append(test_data)
 
         return jsonify({
             'success': True,

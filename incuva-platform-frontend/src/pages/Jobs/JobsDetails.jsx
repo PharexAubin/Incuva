@@ -8,6 +8,7 @@ import {
   Download, Phone, Code2, Eye, FileText, UserCheck,
   Zap, Lightbulb, User, Mail, ExternalLink, Sparkles
 } from "lucide-react";
+import ApplicationTestsSection from "./ApplicationTestsSection";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -109,7 +110,12 @@ export default function JobsDetails() {
         }));
       }
 
-      setModalOpen(false);
+      // Après une acceptation, la modale reste ouverte avec le statut à jour : l'entreprise peut
+      // envoyer un test technique tout de suite. Un refus ferme la modale comme avant.
+      setSelectedCandidate(prev =>
+        prev && prev.application_id === applicationId ? { ...prev, status } : prev
+      );
+      if (status !== 'accepted') setModalOpen(false);
     }
     setUpdating(null);
   };
@@ -652,6 +658,13 @@ export default function JobsDetails() {
                   </div>
                 )}
               </div>
+
+              {/* TESTS TECHNIQUES : envoi (candidature acceptée) et résultats */}
+              <ApplicationTestsSection
+                key={selectedCandidate.application_id}
+                application={selectedCandidate}
+                jobId={jobId}
+              />
 
               {/* Action Buttons */}
               {selectedCandidate.status === 'pending' && (

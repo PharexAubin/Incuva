@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import MessagingHeader from "../../components/MessagingHeader";
 import MessageList from "../../components/MessageList";
+import PinnedTestsBar from "../../components/PinnedTestsBar";
 import MessageInput from "../../components/MessageInput";
 import { getConversation, sendMessage, sendFile } from "../../services/messaging";
 
@@ -11,6 +12,7 @@ export default function Messaging() {
   const navigate = useNavigate();
 
   const [messages, setMessages] = useState([]);
+  const [assignments, setAssignments] = useState([]); // tests techniques assignés dans cette conversation
   const [otherName, setOtherName] = useState("");
   const [currentUserName, setCurrentUserName] = useState("Moi"); // ← NOUVEAU
   const [senderId, setSenderId] = useState(""); // ← CORRIGÉ
@@ -59,6 +61,7 @@ export default function Messaging() {
       const res = await getConversation(chatId);
       if (res.success) {
         setMessages(res.messages || []);
+        setAssignments(res.test_assignments || []);
         setOtherName(res.otherParticipantName || "Inconnu");
         setCurrentUserName(res.current_user_name || "Moi"); // ← NOM DU CONNECTÉ
         setSenderId(res.current_user_id); // ← UID DU CONNECTÉ
@@ -175,12 +178,17 @@ export default function Messaging() {
         candidateId={candidateId}
       />
 
+      {/* Tests techniques épinglés (restent visibles hors de la zone qui défile) */}
+      <PinnedTestsBar assignments={assignments} currentAccountType={currentAccountType} />
+
       {/* Liste des messages */}
       <MessageList
         messages={messages}
         senderId={senderId}
         otherName={otherName}
         currentUserName={currentUserName} // ← PASSÉ ICI
+        assignments={assignments}
+        currentAccountType={currentAccountType}
         loading={loading}
         isTyping={isTyping}
         messagesEndRef={messagesEndRef}

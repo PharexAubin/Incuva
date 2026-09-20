@@ -85,6 +85,7 @@ function App() {
         <Route path="/technical-tests" element={<TechnicalTestsDashboard />} />
         <Route path="/jobs/:jobId/technical-test" element={<TechnicalTest />} />
         <Route path="/jobs/:jobId/technical-test/:testId?" element={<TechnicalTest />} />
+        <Route path="/technical-test/:testId" element={<TechnicalTestPage />} />
         <Route path="/api/technical-test/:testId" element={<TechnicalTestPage />} />
         <Route path="/company/test-results" element={<TestResultsDashboard />} />
         <Route path="/test-results/:testId" element={<TestResultsDashboard />} />

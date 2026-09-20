@@ -21,6 +21,8 @@ export default function MessageList({
   isTyping,
   messagesEndRef,
   currentUserName,
+  assignments = [],
+  currentAccountType,
 }) {
   const getInitialsColor = (name) => {
     const colors = [
@@ -303,6 +305,59 @@ export default function MessageList({
             Ouvrir le contrat
           </button>
         </div>
+      );
+    }
+    if (msg.type === "technical_test") {
+      // L'état (à passer / soumis / note) vient de l'assignation, rafraîchie avec la conversation
+      const assignment = assignments.find((a) => a.id === msg.assignment_id);
+      const isCompany = currentAccountType === "company";
+      const submitted = assignment?.status === "submitted";
+      const result = assignment?.result;
+      // Le candidat peut ouvrir le test en cliquant n'importe où sur la carte (pas seulement sur le bouton),
+      // tant qu'il n'est pas soumis. Ne dépend pas de `assignments` : la carte reste cliquable même si la
+      // liste n'est pas encore chargée (le serveur contrôle l'accès à l'ouverture du test).
+      const canOpen = !isCompany && !submitted;
+      const cardClasses = `rounded-xl p-4 max-w-sm ${
+        isCurrentUser ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white border border-blue-300" : "bg-white text-gray-900 border border-gray-200"
+      }`;
+      const cardContent = (
+        <>
+          <p className="font-semibold mb-1">📝 Test technique assigné</p>
+          <p className="text-sm mb-2">
+            <span className="font-medium">{msg.test_title}</span>
+          </p>
+          {submitted ? (
+            <div className="text-sm">
+              <p className="font-medium">{isCompany ? "Test soumis par le candidat" : "Test soumis"}</p>
+              {result ? (
+                <p className="text-xs mt-1 opacity-90">
+                  Résultat : {result.score}/{result.max_score} ({Math.round(result.percentage)} %)
+                  {result.passed ? " — réussi" : " — non réussi"}
+                </p>
+              ) : (
+                <p className="text-xs mt-1 opacity-90">Résultat non communiqué</p>
+              )}
+            </div>
+          ) : isCompany ? (
+            <p className="text-sm opacity-90">
+              {assignment ? "En attente du candidat" : "Test indisponible"}
+            </p>
+          ) : (
+            <span className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg text-sm font-medium">
+              Passer le test
+            </span>
+          )}
+        </>
+      );
+      return canOpen ? (
+        <Link
+          to={`/technical-test/${msg.test_id}`}
+          className={`${cardClasses} block cursor-pointer hover:shadow-lg transition-shadow`}
+        >
+          {cardContent}
+        </Link>
+      ) : (
+        <div className={cardClasses}>{cardContent}</div>
       );
     }
     if (msg.type === "audio" || (msg.type === "document" && msg.audioUrl)) {

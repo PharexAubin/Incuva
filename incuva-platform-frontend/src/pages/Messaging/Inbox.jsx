@@ -13,6 +13,7 @@ import {
   CheckCheck,
   Image as ImageIcon,
   FileText,
+  ClipboardList,
   Video,
   Bell,
   Settings,
@@ -73,7 +74,8 @@ const ChatItem = ({ chat, isSelected, onSelect, onNavigate, onShowActions }) => 
     const icons = {
       image: <ImageIcon className="w-4 h-4" />,
       video: <Video className="w-4 h-4" />,
-      document: <FileText className="w-4 h-4" />
+      document: <FileText className="w-4 h-4" />,
+      technical_test: <ClipboardList className="w-4 h-4" />
     };
     return icons[type] || null;
   };
