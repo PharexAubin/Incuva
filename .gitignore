@@ -1,0 +1,20 @@
+# Python (backend)
+**/venv/
+**/__pycache__/
+**/*.pyc
+
+# Node (frontend + web)
+**/node_modules/
+**/dist/
+**/.next/
+**/build/
+
+# Secrets et configuration sensible
+**/.env
+**/.env.local
+**/incuva_cred.json
+
+# Divers
+**/.vscode/
+**/*.log
+**/.DS_Store
