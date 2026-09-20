@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from ..utils.recruitment_utils import to_datetime, display_name
 from ..services.messaging_service import MessagingService
+from ..services.qualification_service import QualificationService
 from ..services.test_assignment_service import (
     TestAssignmentService, AssignmentError, sanitize_test_for_candidate
 )
@@ -21,6 +22,17 @@ technical_test_bp = Blueprint('technical_test', __name__)
 
 def assignment_service():
     return TestAssignmentService(db, MessagingService(db))
+
+
+def sync_qualification(attempt, test_data):
+    """Qualifie automatiquement la candidature liée si le résultat officiel de la tentative est « réussi ».
+
+    Ne doit jamais faire échouer la soumission ou la correction qui l'appelle : l'erreur est seulement journalisée.
+    """
+    try:
+        QualificationService(db).sync_from_attempt(attempt, test_data)
+    except Exception as error:
+        logger.error(f"Erreur de qualification automatique : {error}")
 
 
 def assignment_error_response(error):
@@ -1015,6 +1027,9 @@ def submit_technical_test(test_id):
             )
         })
 
+        # Test réussi (résultat officiel) → la candidature devient « qualifiée »
+        sync_qualification(dict(attempt_doc, application_id=assignment['application_id']), test_data)
+
         return jsonify({
             'success': True,
             'data': {
@@ -1297,18 +1312,26 @@ def evaluate_test_with_ai(test_id):
         if session['uid'] != test_data.get('company_id') and session.get('account_type') != 'admin':
             return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
 
+        # La tentative doit appartenir à ce test : sinon une entreprise pourrait noter la tentative d'une autre
+        # (et, avec elle, faire qualifier une candidature qui n'est pas la sienne)
+        if attempt_data.get('test_id') != test_id:
+            return jsonify({'success': False, 'error': 'Tentative non trouvée pour ce test'}), 404
+
         # Évaluer avec l'IA
         evaluation_results = evaluate_with_ai(test_data, attempt_data)
 
         # Mettre à jour la tentative
-        attempt_ref.update({
+        ai_update = {
             'ai_evaluation': evaluation_results,
             'ai_score': evaluation_results.get('total_score'),
             'ai_percentage': evaluation_results.get('percentage'),
             'ai_passed': evaluation_results.get('passed'),
             'evaluated_at': datetime.now(),
             'status': 'evaluated'
-        })
+        }
+        attempt_ref.update(ai_update)
+
+        sync_qualification(dict(attempt_data, **ai_update), test_data)
 
         return jsonify({
             'success': True,
@@ -1627,6 +1650,10 @@ def manually_grade_attempt(test_id, attempt_id):
         if session['uid'] != test_data.get('company_id'):
             return jsonify({'success': False, 'error': 'Accès non autorisé'}), 403
 
+        # La tentative doit appartenir à ce test (voir evaluate-ai)
+        if attempt_data.get('test_id') != test_id:
+            return jsonify({'success': False, 'error': 'Tentative non trouvée pour ce test'}), 404
+
         # Calculer le score total
         total_score = 0
         max_score = test_data.get('total_points', 0)
@@ -1654,6 +1681,9 @@ def manually_grade_attempt(test_id, attempt_id):
         }
 
         attempt_ref.update(update_data)
+
+        # Correction manuelle réussie → la candidature devient « qualifiée »
+        sync_qualification(dict(attempt_data, **update_data), test_data)
 
         return jsonify({
             'success': True,

@@ -10,6 +10,7 @@ from flask import current_app
 
 from ..utils.recruitment_utils import to_datetime, application_date, display_name
 from ..utils.s3_utils import key_from_url, owns_key, presigned_get_url, content_type_for
+from ..services.qualification_service import QualificationService, QualificationError
 
 
 jobs_bp = Blueprint('jobs', __name__, url_prefix='/jobs')
@@ -485,6 +486,38 @@ def update_application_status(application_id):
         return jsonify({'error': f'Erreur lors de la mise à jour: {str(e)}'}), 500
 
 
+def _change_qualification(application_id, qualify):
+    """Qualifie / retire la qualification d'une candidature. Réservé à l'entreprise propriétaire ; la règle
+    « candidature acceptée » est contrôlée par QualificationService à partir de la base, pas de l'interface."""
+    if 'uid' not in session or session.get('account_type') != 'company':
+        return jsonify({'success': False, 'error': 'Accès non autorisé', 'code': 'forbidden'}), 403
+
+    try:
+        service = QualificationService(g.db)
+        if qualify:
+            changed = service.qualify(application_id, source='manual', company_id=session['uid'])
+        else:
+            changed = service.unqualify(application_id, company_id=session['uid'])
+        return jsonify({'success': True, 'qualified': qualify, 'changed': changed})
+    except QualificationError as error:
+        return jsonify({'success': False, 'error': error.message, 'code': error.code}), error.status
+    except Exception as e:
+        logger.error(f"Erreur qualification de la candidature {application_id}: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@jobs_bp.route('/application/<application_id>/qualify', methods=['POST'])
+def qualify_application(application_id):
+    """Qualifie manuellement un candidat (ex. après entretien, pour une offre sans test technique)."""
+    return _change_qualification(application_id, qualify=True)
+
+
+@jobs_bp.route('/application/<application_id>/unqualify', methods=['POST'])
+def unqualify_application(application_id):
+    """Retire la qualification d'un candidat."""
+    return _change_qualification(application_id, qualify=False)
+
+
 # === NOUVELLE ROUTE : Récupérer les candidatures d'une offre ===
 @jobs_bp.route('/api/job_applications/<job_id>', methods=['GET'])
 def api_get_job_applications(job_id):
@@ -507,6 +540,7 @@ def api_get_job_applications(job_id):
         for doc in apps_ref.stream():
             data = doc.to_dict()
             data['application_id'] = doc.id
+            data.setdefault('qualified', False)  # anciennes candidatures créées avant ce champ
             # Récupérer le nom du candidat
             user_doc = g.db.collection('users').document(data['candidate_id']).get()
             data['candidate_name'] = display_name(
@@ -652,6 +686,9 @@ def api_my_applications():
         for doc in apps_ref:
             app = doc.to_dict()
             app['application_id'] = doc.id
+            # La qualification est une information de recrutement interne : jamais renvoyée au candidat
+            for internal_field in ('qualified', 'qualified_at', 'qualified_source'):
+                app.pop(internal_field, None)
             # Récupérer le job
             job_doc = g.db.collection('jobs').document(app['job_id']).get()
             if job_doc.exists:
@@ -961,6 +998,7 @@ def quick_apply_job(job_id):
             'applied_at': firestore.SERVER_TIMESTAMP,
             'submitted_at': firestore.SERVER_TIMESTAMP,
             'urgency': 'normal',
+            'qualified': False,
             'is_quick_apply': True,
             'candidate_name': display_name(candidate_profile)
         }

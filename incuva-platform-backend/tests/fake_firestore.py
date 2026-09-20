@@ -77,7 +77,9 @@ class Query:
         self.max_results = max_results
 
     # --- construction de la requête
-    def where(self, field, op, value):
+    def where(self, field=None, op=None, value=None, filter=None):
+        if filter is not None:  # where(filter=FieldFilter(...)) : syntaxe recommandée par le client Firestore
+            field, op, value = filter.field_path, filter.op_string, filter.value
         return Query(self.db, self.collection_path, self.filters + ((field, op, value),), self.max_results)
 
     def limit(self, count):

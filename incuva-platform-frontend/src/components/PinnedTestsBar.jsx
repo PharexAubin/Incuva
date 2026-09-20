@@ -38,9 +38,11 @@ export default function PinnedTestsBar({ assignments = [], currentAccountType })
                 <span className="flex-shrink-0 text-xs font-medium text-amber-800">
                   {!submitted
                     ? "En attente du candidat"
-                    : result
-                      ? `${result.score}/${result.max_score} (${Math.round(result.percentage)} %)`
-                      : "Soumis"}
+                    : result?.awaiting_grading
+                      ? "À corriger"
+                      : result
+                        ? `${result.score}/${result.max_score} (${Math.round(result.percentage)} %)`
+                        : "Soumis"}
                 </span>
               ) : (
                 <Link

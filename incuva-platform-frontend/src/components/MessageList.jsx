@@ -329,7 +329,9 @@ export default function MessageList({
           {submitted ? (
             <div className="text-sm">
               <p className="font-medium">{isCompany ? "Test soumis par le candidat" : "Test soumis"}</p>
-              {result ? (
+              {result?.awaiting_grading ? (
+                <p className="text-xs mt-1 opacity-90">En attente de correction</p>
+              ) : result ? (
                 <p className="text-xs mt-1 opacity-90">
                   Résultat : {result.score}/{result.max_score} ({Math.round(result.percentage)} %)
                   {result.passed ? " — réussi" : " — non réussi"}

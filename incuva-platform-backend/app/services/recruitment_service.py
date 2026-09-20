@@ -35,6 +35,7 @@ class RecruitmentService:
                 'company_name': company_data.get('companyName') or company_data.get('name') or 'Entreprise',
                 'candidate_name': display_name(candidate_doc.to_dict() if candidate_doc.exists else None),
                 'status': 'pending',
+                'qualified': False,  # passe à True via QualificationService (test réussi ou qualification manuelle)
                 'applied_at': now,
                 'submitted_at': now,  # conservé pour compatibilité avec les anciennes candidatures
                 'is_quick_apply': False,
@@ -88,11 +89,16 @@ class RecruitmentService:
         data['job_title'] = job_doc.to_dict().get('title', 'Unknown') if job_doc.exists else 'Unknown'
 
         if with_candidate:
+            data.setdefault('qualified', False)  # anciennes candidatures créées avant ce champ
             candidate_doc = self.db.collection('users').document(data['candidate_id']).get()
             data['candidate_name'] = display_name(
                 candidate_doc.to_dict() if candidate_doc.exists else None,
                 fallback='Candidat ' + data['candidate_id'][:8]
             )
+        else:
+            # Vue candidat : la qualification est une information de recrutement interne
+            for internal_field in ('qualified', 'qualified_at', 'qualified_source'):
+                data.pop(internal_field, None)
         return data
 
     def get_all_applications(self, user_id):

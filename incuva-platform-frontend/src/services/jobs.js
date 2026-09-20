@@ -243,3 +243,27 @@ export async function createService(serviceData) {
   }
 }
 
+
+/**
+ * Qualifie / retire la qualification d'un candidat (candidature ACCEPTÉE uniquement : règle contrôlée par le serveur).
+ * @param {string} applicationId
+ * @param {boolean} qualify - true pour qualifier, false pour retirer la qualification
+ * @returns {Promise<Object>} { success, qualified, changed } ou { success: false, error, code }
+ */
+export async function setApplicationQualification(applicationId, qualify) {
+  try {
+    const action = qualify ? 'qualify' : 'unqualify';
+    const response = await fetch(`${API_BASE_URLs}/application/${applicationId}/${action}`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      return { success: false, error: data.error || 'Erreur lors de la mise à jour de la qualification', code: data.code };
+    }
+    return { success: true, qualified: data.qualified, changed: data.changed };
+  } catch (error) {
+    console.error('Erreur setApplicationQualification:', error);
+    return { success: false, error: 'Erreur réseau' };
+  }
+}

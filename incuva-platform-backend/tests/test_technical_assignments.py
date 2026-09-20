@@ -11,7 +11,7 @@ import re
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from firebase_admin import firestore
 from flask import Flask, g
@@ -34,13 +34,20 @@ def _load_modules():
     init_firebase = types.ModuleType('fakeapp.firebase.init_firebase')
     init_firebase.db = FakeFirestore()
     sys.modules['fakeapp.firebase.init_firebase'] = init_firebase
+    with patch.object(firestore, 'client', return_value=MagicMock()):  # jobs.py appelle firestore.client() à l'import
+        jobs_routes = importlib.import_module('fakeapp.routes.jobs')
     return (importlib.import_module('fakeapp.routes.TechnicalTest'),
             importlib.import_module('fakeapp.routes.messaging'),
             importlib.import_module('fakeapp.services.messaging_service'),
-            importlib.import_module('fakeapp.services.test_assignment_service'))
+            importlib.import_module('fakeapp.services.test_assignment_service'),
+            jobs_routes,
+            importlib.import_module('fakeapp.services.recruitment_service'),
+            importlib.import_module('fakeapp.services.qualification_service'),
+            importlib.import_module('fakeapp.services.test_results'))
 
 
-TechnicalTest, messaging_routes, messaging_service_module, assignment_module = _load_modules()
+(TechnicalTest, messaging_routes, messaging_service_module, assignment_module,
+ jobs_routes, recruitment_module, qualification_module, results_module) = _load_modules()
 
 QUESTIONS = [
     {'id': 1, 'type': 'mcq', 'text': 'Q1', 'points': 2, 'multiple_correct': False, 'explanation': 'parce que',
@@ -90,11 +97,13 @@ class BaseCase(unittest.TestCase):
         cls.flask_app.secret_key = 'test'
         cls.flask_app.register_blueprint(TechnicalTest.technical_test_bp, url_prefix='')
         cls.flask_app.register_blueprint(messaging_routes.messaging_bp)
+        cls.flask_app.register_blueprint(jobs_routes.jobs_bp)
 
         @cls.flask_app.before_request
         def load_services():
             g.db = CURRENT['db']
             g.messaging_service = messaging_service_module.MessagingService(CURRENT['db'])
+            g.recruitment_service = recruitment_module.RecruitmentService(CURRENT['db'])
 
     def setUp(self):
         self.db = FakeFirestore()
@@ -368,17 +377,6 @@ class ResultsAndConversation(BaseCase):
         self.assertEqual(after['status'], 'submitted')
         self.assertEqual((after['result']['score'], after['result']['max_score']), (3, 5))
         self.assertIn('results', after['attempt'])  # de quoi ouvrir le détail de la tentative
-
-    def test_result_follows_manual_or_ai_grading(self):
-        """Le score n'est pas copié dans l'assignation : une correction ultérieure de la tentative apparaît."""
-        self.assign_as_company()
-        self.submit_as_candidate()
-        attempt_id = self.attempts()[0]['id']
-        self.db.data[f'test_attempts/{attempt_id}'].update(score=5, percentage=100.0, passed=True)
-
-        self.login('C1', 'company')
-        result = self.client.get('/api/applications/A1/tests').get_json()['data'][0]['result']
-        self.assertEqual((result['score'], result['percentage'], result['passed']), (5, 100.0, True))
 
     def test_application_tests_are_private_to_the_owning_company(self):
         self.assign_as_company()

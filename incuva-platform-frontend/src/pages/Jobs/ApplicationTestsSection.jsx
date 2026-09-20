@@ -11,6 +11,9 @@ import {
 import { startConversation } from "../../services/messaging";
 import AttemptDetailsModal from "./Entreprises/TechnicalTest/components/AttemptDetailsModal.jsx";
 
+// Le résultat affiché est le résultat officiel de la tentative (automatique, IA ou correction manuelle)
+const RESULT_SOURCE_LABELS = { ai: "évalué par l'IA", manual: "corrigé manuellement" };
+
 /**
  * Section « Tests techniques » de la fiche de candidature (côté entreprise).
  *
@@ -133,11 +136,16 @@ export default function ApplicationTestsSection({ application, jobId }) {
                       <p className="text-xs text-amber-700 flex items-center gap-1 mt-0.5">
                         <Clock className="w-3 h-3" /> En attente du candidat
                       </p>
+                    ) : result?.awaiting_grading ? (
+                      <p className="text-xs text-amber-700 flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3" /> Soumis, en attente de correction manuelle
+                      </p>
                     ) : result ? (
                       <p className={`text-xs flex items-center gap-1 mt-0.5 ${result.passed ? "text-green-700" : "text-red-700"}`}>
                         <CheckCircle className="w-3 h-3" />
                         {result.score}/{result.max_score} ({Math.round(result.percentage)} %) —{" "}
                         {result.passed ? "réussi" : "non réussi"}
+                        {RESULT_SOURCE_LABELS[result.source] ? ` (${RESULT_SOURCE_LABELS[result.source]})` : ""}
                       </p>
                     ) : (
                       <p className="text-xs text-gray-600 mt-0.5">Soumis</p>

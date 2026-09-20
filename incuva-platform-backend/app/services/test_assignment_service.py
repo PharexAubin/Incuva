@@ -6,6 +6,7 @@ from firebase_admin import firestore
 from google.api_core.exceptions import AlreadyExists
 
 from ..utils.recruitment_utils import to_datetime
+from .test_results import effective_result
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +89,13 @@ class TestAssignmentService:
         return _newest_first(self._to_dict(d) for d in docs)
 
     def with_results(self, assignments, include_attempt=False, hide_scores_if_not_shown=False):
-        """Ajoute à chaque assignation soumise le résultat lu sur la tentative (toujours à jour :
-        l'évaluation IA et la correction manuelle modifient la tentative, pas l'assignation).
+        """Ajoute à chaque assignation soumise le résultat OFFICIEL de la tentative (voir test_results.py).
 
-        hide_scores_if_not_shown : vue candidat, le score n'est donné que si le test a `show_results`.
+        Le résultat est lu sur la tentative à chaque appel : l'évaluation IA et la correction manuelle
+        modifient la tentative (champs ai_* / manual_*), pas l'assignation.
+
+        - `awaiting_grading` : test en correction manuelle pas encore corrigé, aucune note officielle.
+        - hide_scores_if_not_shown : vue candidat, le score n'est donné que si le test a `show_results`.
         """
         tests = {}
         enriched = []
@@ -103,20 +107,24 @@ class TestAssignmentService:
                 attempt_doc = self.db.collection('test_attempts').document(attempt_id).get()
                 if attempt_doc.exists:
                     attempt = attempt_doc.to_dict()
-                    visible = True
-                    if hide_scores_if_not_shown:
-                        test_id = assignment['test_id']
-                        if test_id not in tests:
-                            test_doc = self.db.collection('technical_tests').document(test_id).get()
-                            tests[test_id] = test_doc.to_dict() if test_doc.exists else {}
-                        visible = tests[test_id].get('show_results', True)
-                    if visible:
+                    test_id = assignment['test_id']
+                    if test_id not in tests:
+                        test_doc = self.db.collection('technical_tests').document(test_id).get()
+                        tests[test_id] = test_doc.to_dict() if test_doc.exists else {}
+                    test = tests[test_id]
+
+                    if not (hide_scores_if_not_shown and not test.get('show_results', True)):
+                        official = effective_result(attempt, test.get('grading_mode', 'auto'))
+                        awaiting = not official['official']
                         item['result'] = {
                             'attempt_id': attempt_id,
-                            'score': attempt.get('score'),
-                            'max_score': attempt.get('max_score'),
-                            'percentage': attempt.get('percentage'),
-                            'passed': attempt.get('passed'),
+                            'source': official['source'],
+                            'awaiting_grading': awaiting,
+                            # aucune note tant que la correction manuelle n'a pas eu lieu
+                            'score': None if awaiting else official['score'],
+                            'max_score': official['max_score'],
+                            'percentage': None if awaiting else official['percentage'],
+                            'passed': None if awaiting else official['passed'],
                             'submitted_at': attempt.get('submitted_at'),
                         }
                         if include_attempt:

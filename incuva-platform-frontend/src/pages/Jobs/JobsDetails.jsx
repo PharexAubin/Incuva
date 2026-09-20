@@ -1,5 +1,5 @@
 // src/pages/Jobs/JobsDetails.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getJobDetail, getJobApplications, updateApplicationStatus, getApplicationDocumentUrl } from "../../services/jobs";
 import {
@@ -9,6 +9,9 @@ import {
   Zap, Lightbulb, User, Mail, ExternalLink, Sparkles
 } from "lucide-react";
 import ApplicationTestsSection from "./ApplicationTestsSection";
+import ApplicationQualification from "./ApplicationQualification";
+import PipelineTabs from "./PipelineTabs";
+import { PIPELINE_TABS, countByCategory, filterByTab, defaultTab } from "./pipeline";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -37,6 +40,17 @@ export default function JobsDetails() {
 
   const [updating, setUpdating] = useState(null);
 
+  // Pipeline : l'onglet par défaut est calculé (premier onglet non vide) tant que l'utilisateur n'a pas choisi.
+  // Le filtrage se fait en mémoire sur la liste déjà chargée : aucun rechargement au changement d'onglet.
+  const [activeTab, setActiveTab] = useState(null);
+  const tabCounts = useMemo(() => countByCategory(applications), [applications]);
+  const currentTab = activeTab ?? defaultTab(tabCounts);
+  const visibleApplications = filterByTab(applications, currentTab);
+
+  // Compte les modifications locales (accepter, qualifier...) : un rafraîchissement lancé avant l'une d'elles
+  // ne doit pas écraser son résultat avec des données plus anciennes.
+  const localChanges = useRef(0);
+
   const toJSDate = (ts) => {
       if (!ts) return null;
       if (ts.seconds) {
@@ -50,6 +64,28 @@ export default function JobsDetails() {
     loadData();
   }, [jobId]);
 
+  const applyApplications = (apps) => {
+    setApplications(apps);
+    setStats({
+      total: apps.length,
+      pending: apps.filter(app => app.status === 'pending').length,
+      accepted: apps.filter(app => app.status === 'accepted').length,
+      rejected: apps.filter(app => app.status === 'rejected').length,
+      quickApply: apps.filter(app => app.is_quick_apply).length
+    });
+  };
+
+  // Relit les candidatures : une qualification automatique (test réussi) peut arriver pendant que la page est ouverte
+  const refreshApplications = async () => {
+    const changesAtStart = localChanges.current;
+    const res = await getJobApplications(jobId);
+    if (!res.success || localChanges.current !== changesAtStart) return;
+    applyApplications(res.data);
+    setSelectedCandidate(prev =>
+      prev ? res.data.find(app => app.application_id === prev.application_id) || prev : prev
+    );
+  };
+
   const loadData = async () => {
     setLoading(true);
     const [jobRes, appsRes] = await Promise.all([
@@ -62,22 +98,7 @@ export default function JobsDetails() {
     }
 
     if (appsRes.success) {
-      const apps = appsRes.data;
-      setApplications(apps);
-
-      // Calculer les statistiques
-      const quickApplyCount = apps.filter(app => app.is_quick_apply).length;
-      const pendingCount = apps.filter(app => app.status === 'pending').length;
-      const acceptedCount = apps.filter(app => app.status === 'accepted').length;
-      const rejectedCount = apps.filter(app => app.status === 'rejected').length;
-
-      setStats({
-        total: apps.length,
-        pending: pendingCount,
-        accepted: acceptedCount,
-        rejected: rejectedCount,
-        quickApply: quickApplyCount
-      });
+      applyApplications(appsRes.data);
     }
     setLoading(false);
   };
@@ -85,12 +106,27 @@ export default function JobsDetails() {
   const openModal = (app) => {
     setSelectedCandidate(app);
     setModalOpen(true);
+    refreshApplications();
+  };
+
+  const handleQualificationChange = (applicationId, qualified) => {
+    localChanges.current += 1;
+    const changes = qualified
+      ? { qualified: true, qualified_source: 'manual', qualified_at: new Date().toISOString() }
+      : { qualified: false, qualified_source: null, qualified_at: null };
+    setApplications(prev => prev.map(app =>
+      app.application_id === applicationId ? { ...app, ...changes } : app
+    ));
+    setSelectedCandidate(prev =>
+      prev && prev.application_id === applicationId ? { ...prev, ...changes } : prev
+    );
   };
 
   const handleStatusUpdate = async (applicationId, status) => {
     setUpdating(applicationId);
     const res = await updateApplicationStatus(applicationId, status);
     if (res.success) {
+      localChanges.current += 1;
       setApplications(prev => prev.map(app =>
         app.application_id === applicationId ? { ...app, status } : app
       ));
@@ -392,17 +428,25 @@ export default function JobsDetails() {
             </div>
           </div>
 
-          {applications.length === 0 ? (
+          <PipelineTabs counts={tabCounts} activeTab={currentTab} onChange={setActiveTab} />
+
+          {visibleApplications.length === 0 ? (
             <div className="p-12 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Users className="w-6 h-6 text-gray-400" />
               </div>
-              <p className="text-gray-500 font-medium">Aucune candidature pour le moment.</p>
-              <p className="text-gray-400 text-sm mt-2">Les candidatures apparaitront ici une fois que les candidats auront postulé.</p>
+              <p className="text-gray-500 font-medium">
+                {applications.length === 0
+                  ? "Aucune candidature pour le moment."
+                  : PIPELINE_TABS.find(tab => tab.id === currentTab).empty}
+              </p>
+              {applications.length === 0 && (
+                <p className="text-gray-400 text-sm mt-2">Les candidatures apparaitront ici une fois que les candidats auront postulé.</p>
+              )}
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
-              {applications.map((app, index) => (
+              {visibleApplications.map((app, index) => (
                 <div
                   key={app.application_id}
                   onClick={() => openModal(app)}
@@ -448,6 +492,11 @@ export default function JobsDetails() {
                     <div className="flex items-center gap-4">
                       <div className="flex flex-col items-end gap-2">
                         {getStatusBadge(app.status)}
+                        {app.status === 'accepted' && app.qualified === true && (
+                          <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full">
+                            Qualifié
+                          </span>
+                        )}
                         {app.is_quick_apply && (
                           <div className="flex items-center gap-1 text-xs text-gray-500">
                             <Sparkles className="w-3 h-3" />
@@ -658,6 +707,13 @@ export default function JobsDetails() {
                   </div>
                 )}
               </div>
+
+              {/* QUALIFICATION : visible seulement pour une candidature acceptée */}
+              <ApplicationQualification
+                key={`qualification-${selectedCandidate.application_id}`}
+                application={selectedCandidate}
+                onChange={handleQualificationChange}
+              />
 
               {/* TESTS TECHNIQUES : envoi (candidature acceptée) et résultats */}
               <ApplicationTestsSection
